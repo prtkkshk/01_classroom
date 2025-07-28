@@ -13,14 +13,16 @@ from datetime import datetime, timedelta
 import jwt
 from passlib.context import CryptContext
 import json
+from collections import defaultdict
+import asyncio
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
+mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[os.environ.get('DB_NAME', 'classroom_live')]
 
 # Security
 SECRET_KEY = "your-secret-key-here-change-in-production"
@@ -111,6 +113,14 @@ class PollResults(BaseModel):
     votes: Dict[str, int]
     total_votes: int
 
+class Session(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    token: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    expires_at: datetime
+    is_active: bool = True
+
 # Helper functions
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
@@ -128,14 +138,137 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+# Session Management
+class SessionManager:
+    def __init__(self):
+        self.active_sessions = {}  # token -> user_data
+        self.user_sessions = defaultdict(list)  # user_id -> list of tokens
+        self.websocket_sessions = {}  # websocket -> token
+    
+    def add_session(self, token, user_data):
+        self.active_sessions[token] = user_data
+        self.user_sessions[user_data['id']].append(token)
+    
+    def remove_session(self, token):
+        if token in self.active_sessions:
+            user_data = self.active_sessions[token]
+            self.user_sessions[user_data['id']].remove(token)
+            del self.active_sessions[token]
+    
+    def get_user_sessions(self, user_id):
+        return self.user_sessions.get(user_id, [])
+    
+    def is_token_valid(self, token):
+        return token in self.active_sessions
+    
+    def get_user_from_token(self, token):
+        return self.active_sessions.get(token)
+
+# Create session manager instance
+session_manager = SessionManager()
+
+# Database Session Manager (optional - for better scalability)
+class DatabaseSessionManager:
+    def __init__(self, db):
+        self.db = db
+    
+    async def add_session(self, token, user_data):
+        expires_at = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        session = Session(
+            user_id=user_data['id'],
+            token=token,
+            expires_at=expires_at
+        )
+        await self.db.sessions.insert_one(session.dict())
+    
+    async def remove_session(self, token):
+        await self.db.sessions.update_one(
+            {"token": token},
+            {"$set": {"is_active": False}}
+        )
+    
+    async def is_token_valid(self, token):
+        session = await self.db.sessions.find_one({
+            "token": token,
+            "is_active": True,
+            "expires_at": {"$gt": datetime.utcnow()}
+        })
+        return session is not None
+    
+    async def cleanup_expired_sessions(self):
+        await self.db.sessions.update_many(
+            {"expires_at": {"$lt": datetime.utcnow()}},
+            {"$set": {"is_active": False}}
+        )
+
+# Create database session manager
+db_session_manager = DatabaseSessionManager(db)
+
+# Connection Manager for WebSockets
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections = {}  # websocket -> user_data
+        self.user_connections = defaultdict(list)  # user_id -> list of websockets
+
+    async def connect(self, websocket: WebSocket, user_data: dict):
+        await websocket.accept()
+        self.active_connections[websocket] = user_data
+        self.user_connections[user_data['id']].append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            user_data = self.active_connections[websocket]
+            self.user_connections[user_data['id']].remove(websocket)
+            del self.active_connections[websocket]
+
+    async def send_personal_message(self, message: str, websocket: WebSocket):
+        await websocket.send_text(message)
+
+    async def broadcast(self, message: str):
+        for connection in list(self.active_connections.keys()):
+            try:
+                await connection.send_text(message)
+            except:
+                self.disconnect(connection)
+
+    async def send_to_user(self, user_id: str, message: str):
+        for connection in self.user_connections[user_id]:
+            try:
+                await connection.send_text(message)
+            except:
+                self.user_connections[user_id].remove(connection)
+
+# Create connection manager instance
+manager = ConnectionManager()
+
+# WebSocket endpoint
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    # For now, we'll accept all connections
+    await manager.connect(websocket, {"id": "anonymous"})
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await manager.broadcast(f"Client message: {data}")
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+# Authentication function - THIS MUST BE DEFINED BEFORE BEING USED
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
+    token = credentials.credentials
+    
+    # First check if token is in active sessions
+    if not session_manager.is_token_valid(token):
+        raise credentials_exception
+    
     try:
-        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
@@ -145,45 +278,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     user = await db.users.find_one({"username": username})
     if user is None:
         raise credentials_exception
+    
     return User(**user)
-
-# Add this class to manage WebSocket connections
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def send_personal_message(self, message: str, websocket: WebSocket):
-        await websocket.send_text(message)
-
-    async def broadcast(self, message: str):
-        for connection in self.active_connections[:]:
-            try:
-                await connection.send_text(message)
-            except:
-                # Remove dead connections
-                self.active_connections.remove(connection)
-
-# Create connection manager instance
-manager = ConnectionManager()
-
-# Add this WebSocket endpoint to your server.py (before app.include_router)
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_text()
-            # Echo the message back to all connected clients
-            await manager.broadcast(f"Client message: {data}")
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
 
 # Auth Routes
 @api_router.post("/register", response_model=Token)
@@ -212,15 +308,20 @@ async def register(user_data: UserCreate):
         data={"sub": user_obj.username}, expires_delta=access_token_expires
     )
     
+    user_data_dict = {
+        "id": user_obj.id,
+        "username": user_obj.username,
+        "email": user_obj.email,
+        "role": user_obj.role
+    }
+    
+    # Add to session manager
+    session_manager.add_session(access_token, user_data_dict)
+    
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": {
-            "id": user_obj.id,
-            "username": user_obj.username,
-            "email": user_obj.email,
-            "role": user_obj.role
-        }
+        "user": user_data_dict
     }
 
 @api_router.post("/login", response_model=Token)
@@ -244,15 +345,20 @@ async def login(user_credentials: UserLogin):
             data={"sub": MODERATOR_USERNAME}, expires_delta=access_token_expires
         )
         
+        user_data_dict = {
+            "id": moderator["id"],
+            "username": moderator["username"],
+            "email": moderator["email"],
+            "role": moderator["role"]
+        }
+        
+        # Add to session manager
+        session_manager.add_session(access_token, user_data_dict)
+        
         return {
             "access_token": access_token,
             "token_type": "bearer",
-            "user": {
-                "id": moderator["id"],
-                "username": moderator["username"],
-                "email": moderator["email"],
-                "role": moderator["role"]
-            }
+            "user": user_data_dict
         }
     
     # Check if it's professor login
@@ -274,15 +380,20 @@ async def login(user_credentials: UserLogin):
             data={"sub": PROFESSOR_USERNAME}, expires_delta=access_token_expires
         )
         
+        user_data_dict = {
+            "id": professor["id"],
+            "username": professor["username"],
+            "email": professor["email"],
+            "role": professor["role"]
+        }
+        
+        # Add to session manager
+        session_manager.add_session(access_token, user_data_dict)
+        
         return {
             "access_token": access_token,
             "token_type": "bearer",
-            "user": {
-                "id": professor["id"],
-                "username": professor["username"],
-                "email": professor["email"],
-                "role": professor["role"]
-            }
+            "user": user_data_dict
         }
     
     # Regular student login
@@ -299,16 +410,27 @@ async def login(user_credentials: UserLogin):
         data={"sub": user["username"]}, expires_delta=access_token_expires
     )
     
+    user_data_dict = {
+        "id": user["id"],
+        "username": user["username"],
+        "email": user["email"],
+        "role": user["role"]
+    }
+    
+    # Add to session manager
+    session_manager.add_session(access_token, user_data_dict)
+    
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": {
-            "id": user["id"],
-            "username": user["username"],
-            "email": user["email"],
-            "role": user["role"]
-        }
+        "user": user_data_dict
     }
+
+@api_router.post("/logout")
+async def logout(current_user: User = Depends(get_current_user), credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    session_manager.remove_session(token)
+    return {"message": "Logged out successfully"}
 
 # Question Routes
 @api_router.post("/questions", response_model=Question)
@@ -590,6 +712,25 @@ async def get_admin_stats(current_user: User = Depends(get_current_user)):
         "unanswered_questions": unanswered_questions,
         "total_polls": polls_count,
         "total_votes": votes_count
+    }
+
+@api_router.get("/admin/active-sessions")
+async def get_active_sessions(current_user: User = Depends(get_current_user)):
+    if current_user.role != "moderator":
+        raise HTTPException(status_code=403, detail="Only moderators can access this endpoint")
+    
+    active_sessions = session_manager.active_sessions
+    session_count = len(active_sessions)
+    
+    # Group by user
+    user_session_count = defaultdict(int)
+    for user_data in active_sessions.values():
+        user_session_count[user_data['username']] += 1
+    
+    return {
+        "total_active_sessions": session_count,
+        "unique_users": len(user_session_count),
+        "sessions_per_user": dict(user_session_count)
     }
 
 # Include the router in the main app

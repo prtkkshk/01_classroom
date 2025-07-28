@@ -12,6 +12,7 @@ const AuthContext = createContext();
 const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [sessionId] = useState(() => `session_${Date.now()}_${Math.random()}`);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -25,11 +26,16 @@ const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     try {
-      const response = await axios.post(`${API}/login`, { username, password });
+      const response = await axios.post(`${API}/login`, { 
+        username, 
+        password,
+        session_id: sessionId  // Add session identifier
+      });
       const { access_token, user: userData } = response.data;
       
       localStorage.setItem('token', access_token);
       localStorage.setItem('user', JSON.stringify(userData));
+      localStorage.setItem('session_id', sessionId);
       axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
       setUser(userData);
       return { success: true };
@@ -53,9 +59,17 @@ const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      // Call logout endpoint to remove server-side session
+      await axios.post(`${API}/logout`);
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+    
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('session_id');
     delete axios.defaults.headers.common['Authorization'];
     setUser(null);
   };
