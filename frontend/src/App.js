@@ -3,8 +3,9 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'r
 import axios from 'axios';
 import './App.css';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
-const API = `${BACKEND_URL}/api`.replace(/\/+/g, '/'); // Remove double slashes
+// Temporary fix - hardcode the correct URL
+const BACKEND_URL = 'https://zero1-classroom-1.onrender.com';
+const API = `${BACKEND_URL}/api`;
 
 // Auth Context
 const AuthContext = createContext();
