@@ -3,8 +3,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'r
 import axios from 'axios';
 import './App.css';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
-const API = `${BACKEND_URL}/api`;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
+const API = `${BACKEND_URL}/api`.replace(/\/+/g, '/'); // Remove double slashes
 
 // Auth Context
 const AuthContext = createContext();
@@ -806,7 +806,7 @@ const ProfessorDashboard = () => {
                 <div className="space-y-4">
                   {questions.map((question) => (
                     <div key={question.id} className="bg-white border rounded-lg p-4">
-                      <div className="flex justify-between items-start mb-2">
+                      <div className="flex justify-between items-start">
                         <h4 className="font-medium text-gray-900">{question.question_text}</h4>
                         {!question.is_answered && (
                           <button
