@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
+import React, { useState, useEffect, createContext, useContext, Component } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import './App.css';
@@ -98,6 +98,11 @@ const AuthProvider = ({ children }) => {
         data: error.response?.data
       });
       
+      // Handle network errors
+      if (!error.response) {
+        return { success: false, error: 'Network error - cannot connect to server. Please check your internet connection.' };
+      }
+      
       if (error.response?.status === 404) {
         return { success: false, error: 'API endpoint not found. Please check backend URL.' };
       }
@@ -106,9 +111,22 @@ const AuthProvider = ({ children }) => {
         return { success: false, error: 'Cannot connect to server. Please check if backend is running.' };
       }
       
+      // Handle specific HTTP status codes
+      if (error.response?.status === 401) {
+        return { success: false, error: 'Invalid username or password.' };
+      }
+      
+      if (error.response?.status === 422) {
+        return { success: false, error: 'Invalid input data. Please check your credentials.' };
+      }
+      
+      if (error.response?.status >= 500) {
+        return { success: false, error: 'Server error. Please try again later.' };
+      }
+      
       return { 
         success: false, 
-        error: error.response?.data?.detail || error.message || 'Login failed' 
+        error: error.response?.data?.detail || error.response?.data?.message || error.message || 'Login failed' 
       };
     }
   };
@@ -144,6 +162,11 @@ const AuthProvider = ({ children }) => {
         data: error.response?.data
       });
       
+      // Handle network errors
+      if (!error.response) {
+        return { success: false, error: 'Network error - cannot connect to server. Please check your internet connection.' };
+      }
+      
       if (error.response?.status === 404) {
         return { success: false, error: 'API endpoint not found. Please check backend URL.' };
       }
@@ -152,9 +175,22 @@ const AuthProvider = ({ children }) => {
         return { success: false, error: 'Cannot connect to server. Please check if backend is running.' };
       }
       
+      // Handle specific HTTP status codes
+      if (error.response?.status === 409) {
+        return { success: false, error: 'Username or email already exists. Please choose different credentials.' };
+      }
+      
+      if (error.response?.status === 422) {
+        return { success: false, error: 'Invalid input data. Please check your information.' };
+      }
+      
+      if (error.response?.status >= 500) {
+        return { success: false, error: 'Server error. Please try again later.' };
+      }
+      
       return { 
         success: false, 
-        error: error.response?.data?.detail || error.message || 'Registration failed' 
+        error: error.response?.data?.detail || error.response?.data?.message || error.message || 'Registration failed' 
       };
     }
   };
@@ -187,6 +223,43 @@ const useAuth = () => {
   return context;
 };
 
+// Error Boundary Component
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Error caught by boundary:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-lg p-8 max-w-md w-full text-center">
+            <h1 className="text-2xl font-bold text-red-600 mb-4">Something went wrong</h1>
+            <p className="text-gray-600 mb-4">We're sorry, but something unexpected happened.</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-colors"
+            >
+              Reload Page
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 // Backend Test Component
 const BackendTest = () => {
   const [status, setStatus] = useState('Testing...');
@@ -210,11 +283,22 @@ const BackendTest = () => {
   }, []);
 
   return (
-    <div style={{ padding: '10px', margin: '10px', border: '1px solid #ccc', backgroundColor: 'white' }}>
-      <h3>Backend Status: {status}</h3>
-      {error && <p style={{ color: 'red' }}>Error: {error}</p>}
-      <p>Backend URL: {BACKEND_URL}</p>
-      <p>API URL: {API}</p>
+    <div style={{ 
+      position: 'fixed', 
+      top: '10px', 
+      right: '10px', 
+      padding: '10px', 
+      border: '1px solid #ccc', 
+      backgroundColor: 'white',
+      borderRadius: '8px',
+      fontSize: '12px',
+      maxWidth: '300px',
+      zIndex: 1000
+    }}>
+      <h4 style={{ margin: '0 0 5px 0' }}>Backend Status: {status}</h4>
+      {error && <p style={{ color: 'red', margin: '5px 0' }}>Error: {error}</p>}
+      <p style={{ margin: '5px 0' }}>Backend URL: {BACKEND_URL}</p>
+      <p style={{ margin: '5px 0' }}>API URL: {API}</p>
     </div>
   );
 };
@@ -233,7 +317,20 @@ const Login = () => {
     setLoading(true);
     setError('');
 
-    const result = await login(username, password);
+    // Basic validation
+    if (!username.trim()) {
+      setError('Username is required');
+      setLoading(false);
+      return;
+    }
+
+    if (!password.trim()) {
+      setError('Password is required');
+      setLoading(false);
+      return;
+    }
+
+    const result = await login(username.trim(), password);
     if (result.success) {
       navigate('/');
     } else {
@@ -243,14 +340,22 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center p-4">
-      {/* Backend Test Component */}
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center p-4 relative">
+      {/* Backend Test Component - Fixed positioning */}
       <BackendTest />
       
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
         <div className="text-center mb-8">
           <div className="flex flex-row items-center justify-center gap-3 mb-2">
-            <img src={process.env.PUBLIC_URL + '/Untitled_design__2_-removebg-preview.png'} alt="Classroom Logo" style={{ width: 56, height: 56 }} />
+            <img 
+              src={`${process.env.PUBLIC_URL}/Untitled_design__2_-removebg-preview.png`} 
+              alt="Classroom Logo" 
+              style={{ width: 56, height: 56 }} 
+              onError={(e) => {
+                e.target.style.display = 'none';
+                console.error('Logo image failed to load');
+              }}
+            />
             <span className="text-3xl font-bold text-gray-900">Classroom</span>
           </div>
           <p className="text-gray-600">Sign in to your Classroom account</p>
@@ -341,7 +446,15 @@ const Register = () => {
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
         <div className="text-center mb-8">
           <div className="flex flex-row items-center justify-center gap-3 mb-2">
-            <img src={process.env.PUBLIC_URL + '/Untitled_design__2_-removebg-preview.png'} alt="Classroom Logo" style={{ width: 56, height: 56 }} />
+            <img 
+              src={`${process.env.PUBLIC_URL}/Untitled_design__2_-removebg-preview.png`} 
+              alt="Classroom Logo" 
+              style={{ width: 56, height: 56 }} 
+              onError={(e) => {
+                e.target.style.display = 'none';
+                console.error('Logo image failed to load');
+              }}
+            />
             <span className="text-3xl font-bold text-gray-900">Classroom</span>
           </div>
           <div className="text-gray-500 mb-2">Create Account</div>
@@ -437,9 +550,123 @@ const ProtectedRoute = ({ children }) => {
   return children;
 };
 
+// Placeholder Dashboard Components (these were missing)
+const StudentDashboard = () => {
+  const { user, logout } = useAuth();
+  
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-white shadow">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center py-6">
+            <div className="flex items-center">
+              <h1 className="text-2xl font-bold text-gray-900">Student Dashboard</h1>
+            </div>
+            <div className="flex items-center space-x-4">
+              <span className="text-gray-700">Welcome, {user.username}!</span>
+              <button
+                onClick={logout}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <div className="px-4 py-6 sm:px-0">
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-medium text-gray-900 mb-4">Your Classes</h2>
+            <p className="text-gray-600">No classes enrolled yet.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ProfessorDashboard = () => {
+  const { user, logout } = useAuth();
+  
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-white shadow">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center py-6">
+            <div className="flex items-center">
+              <h1 className="text-2xl font-bold text-gray-900">Professor Dashboard</h1>
+            </div>
+            <div className="flex items-center space-x-4">
+              <span className="text-gray-700">Welcome, Prof. {user.username}!</span>
+              <button
+                onClick={logout}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <div className="px-4 py-6 sm:px-0">
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-medium text-gray-900 mb-4">Your Courses</h2>
+            <p className="text-gray-600">No courses created yet.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ModeratorDashboard = () => {
+  const { user, logout } = useAuth();
+  
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-white shadow">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center py-6">
+            <div className="flex items-center">
+              <h1 className="text-2xl font-bold text-gray-900">Moderator Dashboard</h1>
+            </div>
+            <div className="flex items-center space-x-4">
+              <span className="text-gray-700">Welcome, {user.username}!</span>
+              <button
+                onClick={logout}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+        <div className="px-4 py-6 sm:px-0">
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-medium text-gray-900 mb-4">System Overview</h2>
+            <p className="text-gray-600">Moderation tools will be displayed here.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Dashboard Component
 const Dashboard = () => {
   const { user } = useAuth();
+  
+  // Add null check for user
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
   
   if (user.role === 'student') {
     return <StudentDashboard />;
@@ -455,22 +682,24 @@ const Dashboard = () => {
 // Main App Component
 function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route 
-            path="/" 
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            } 
-          />
-        </Routes>
-      </Router>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <Router>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route 
+              path="/" 
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              } 
+            />
+          </Routes>
+        </Router>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
 
