@@ -457,6 +457,25 @@ async def get_user_vote(poll_id: str, current_user: User = Depends(get_current_u
         return {"voted": True, "option": vote["option_selected"]}
     return {"voted": False}
 
+@api_router.delete("/polls/{poll_id}")
+async def delete_own_poll(poll_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role != "professor":
+        raise HTTPException(status_code=403, detail="Only professors can delete their own polls")
+
+    poll = await db.polls.find_one({"id": poll_id})
+    if not poll:
+        raise HTTPException(status_code=404, detail="Poll not found")
+    if poll["created_by"] != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete polls you created")
+
+    # Delete all votes for this poll first
+    await db.votes.delete_many({"poll_id": poll_id})
+    result = await db.polls.delete_one({"id": poll_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Poll not found")
+
+    return {"message": "Poll and all associated votes deleted successfully"}
+
 # Moderator-specific endpoints for full CRUD access
 @api_router.get("/admin/users", response_model=List[User])
 async def get_all_users(current_user: User = Depends(get_current_user)):

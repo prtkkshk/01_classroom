@@ -883,7 +883,7 @@ const ProfessorDashboard = () => {
                   <h3 className="text-lg font-semibold mb-4">My Polls</h3>
                   <div className="space-y-6">
                     {polls.map((poll) => (
-                      <ProfessorPollCard key={poll.id} poll={poll} />
+                      <ProfessorPollCard key={poll.id} poll={poll} onDelete={fetchPolls} />
                     ))}
                   </div>
                 </div>
@@ -896,9 +896,10 @@ const ProfessorDashboard = () => {
   );
 };
 
-const ProfessorPollCard = ({ poll }) => {
+const ProfessorPollCard = ({ poll, onDelete }) => {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     fetchResults();
@@ -913,6 +914,17 @@ const ProfessorPollCard = ({ poll }) => {
       console.error('Error fetching poll results:', error);
     }
     setLoading(false);
+  };
+
+  const handleDelete = async () => {
+    if (window.confirm('Are you sure you want to delete this poll and all its votes?')) {
+      try {
+        await axios.delete(`${API}/polls/${poll.id}`);
+        if (onDelete) onDelete();
+      } catch (error) {
+        alert('Error deleting poll: ' + (error.response?.data?.detail || error.message));
+      }
+    }
   };
 
   if (loading) {
@@ -936,7 +948,6 @@ const ProfessorPollCard = ({ poll }) => {
         {results && results.poll.options.map((option, index) => {
           const voteCount = results.votes[option] || 0;
           const percentage = results.total_votes > 0 ? (voteCount / results.total_votes) * 100 : 0;
-          
           return (
             <div key={index} className="space-y-2">
               <div className="flex justify-between text-sm">
@@ -957,6 +968,15 @@ const ProfessorPollCard = ({ poll }) => {
         <span>Total votes: {results?.total_votes || 0}</span>
         <span className="ml-4">Created: {new Date(poll.created_at).toLocaleDateString()}</span>
       </div>
+      {/* Show delete button only if user is the creator */}
+      {user && poll.created_by === user.id && (
+        <button
+          onClick={handleDelete}
+          className="mt-4 bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700"
+        >
+          Delete
+        </button>
+      )}
     </div>
   );
 };
