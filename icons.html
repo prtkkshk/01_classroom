@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classroom Logo Design</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 50px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 300;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            margin: 0;
+        }
+
+        .logo-showcase {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        .logo-card {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .logo-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 30px 60px rgba(0,0,0,0.15);
+        }
+
+        .logo-card h3 {
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 1.2rem;
+            font-weight: 500;
+        }
+
+        /* Primary Logo */
+        .logo-primary {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .logo-icon {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .logo-icon::before {
+            content: '';
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 3px;
+            position: relative;
+        }
+
+        .logo-icon::after {
+            content: '';
+            position: absolute;
+            top: 15px;
+            right: 12px;
+            width: 8px;
+            height: 8px;
+            background: rgba(255,255,255,0.7);
+            border-radius: 50%;
+        }
+
+        .logo-text {
+            font-size: 2rem;
+            font-weight: 600;
+            color: #333;
+            letter-spacing: -0.5px;
+        }
+
+        /* Icon Only Logo */
+        .logo-icon-large {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 20px auto;
+            position: relative;
+        }
+
+        .logo-icon-large::before {
+            content: '';
+            width: 32px;
+            height: 32px;
+            background: white;
+            border-radius: 5px;
+            position: relative;
+        }
+
+        .logo-icon-large::after {
+            content: '';
+            position: absolute;
+            top: 24px;
+            right: 20px;
+            width: 12px;
+            height: 12px;
+            background: rgba(255,255,255,0.7);
+            border-radius: 50%;
+        }
+
+        /* Text Only Logo */
+        .logo-text-only {
+            font-size: 2.5rem;
+            font-weight: 300;
+            color: #333;
+            margin: 30px 0;
+            position: relative;
+        }
+
+        .logo-text-only::after {
+            content: '';
+            position: absolute;
+            bottom: -5px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 3px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 2px;
+        }
+
+        /* Stacked Logo */
+        .logo-stacked {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        /* Color Variations */
+        .color-variations {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            margin-top: 30px;
+            flex-wrap: wrap;
+        }
+
+        .color-variant {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .variant-1 { background: #f8f9fa; color: #333; }
+        .variant-2 { background: #333; color: white; }
+        .variant-3 { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+
+        .color-variant .mini-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            position: relative;
+        }
+
+        .variant-1 .mini-icon { background: linear-gradient(135deg, #667eea, #764ba2); }
+        .variant-2 .mini-icon { background: white; }
+        .variant-3 .mini-icon { background: rgba(255,255,255,0.3); }
+
+        .mini-icon::before {
+            content: '';
+            position: absolute;
+            top: 4px;
+            left: 4px;
+            width: 8px;
+            height: 8px;
+            background: currentColor;
+            border-radius: 1px;
+            opacity: 0.8;
+        }
+
+        .usage-notes {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 30px;
+            color: white;
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .usage-notes h3 {
+            margin-bottom: 20px;
+            font-size: 1.4rem;
+        }
+
+        .usage-notes ul {
+            list-style: none;
+            padding: 0;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            text-align: left;
+        }
+
+        .usage-notes li {
+            padding: 10px 15px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Classroom Logo Collection</h1>
+            <p>Minimalistic designs for your interactive digital learning platform</p>
+        </div>
+
+        <div class="logo-showcase">
+            <div class="logo-card">
+                <h3>Primary Logo (Horizontal)</h3>
+                <div class="logo-primary">
+                    <div class="logo-icon"></div>
+                    <div class="logo-text">Classroom</div>
+                </div>
+                <p>Perfect for headers, business cards, and general use</p>
+            </div>
+
+            <div class="logo-card">
+                <h3>Icon Only</h3>
+                <div class="logo-icon-large"></div>
+                <p>Great for app icons, favicons, and social media profiles</p>
+            </div>
+
+            <div class="logo-card">
+                <h3>Text Only</h3>
+                <div class="logo-text-only">Classroom</div>
+                <p>Clean typography for minimalist applications</p>
+            </div>
+
+            <div class="logo-card">
+                <h3>Stacked Version</h3>
+                <div class="logo-stacked">
+                    <div class="logo-icon-large" style="width: 60px; height: 60px;">
+                        <div style="width: 24px; height: 24px; background: white; border-radius: 4px; position: relative;">
+                            <div style="position: absolute; top: -6px; right: -6px; width: 8px; height: 8px; background: rgba(255,255,255,0.7); border-radius: 50%;"></div>
+                        </div>
+                    </div>
+                    <div style="font-size: 1.5rem; font-weight: 600; color: #333;">Classroom</div>
+                </div>
+                <p>Ideal for square layouts and mobile interfaces</p>
+            </div>
+        </div>
+
+        <div class="logo-card">
+            <h3>Color Variations</h3>
+            <div class="color-variations">
+                <div class="color-variant variant-1">
+                    <div class="mini-icon"></div>
+                    <span>Classroom</span>
+                </div>
+                <div class="color-variant variant-2">
+                    <div class="mini-icon"></div>
+                    <span>Classroom</span>
+                </div>
+                <div class="color-variant variant-3">
+                    <div class="mini-icon"></div>
+                    <span>Classroom</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="usage-notes">
+            <h3>Design Concept</h3>
+            <ul>
+                <li><strong>Icon Meaning:</strong> The square represents a digital screen/classroom, while the dot symbolizes student interaction and engagement</li>
+                <li><strong>Color Palette:</strong> Modern gradient from purple to blue, suggesting innovation and trust</li>
+                <li><strong>Typography:</strong> Clean, modern sans-serif that's highly readable across all devices</li>
+                <li><strong>Scalability:</strong> Works perfectly from favicon size to billboard</li>
+                <li><strong>Versatility:</strong> Multiple variations for different use cases and backgrounds</li>
+                <li><strong>Brand Values:</strong> Represents interaction, accessibility, and modern education technology</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
