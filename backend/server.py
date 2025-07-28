@@ -598,7 +598,11 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],  # Add your frontend URLs here
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://zero1-classroom-2.onrender.com"
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
