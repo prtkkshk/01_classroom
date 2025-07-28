@@ -39,12 +39,27 @@ const AuthProvider = ({ children }) => {
   useEffect(() => {
     const token = localStorage.getItem('token');
     const userData = localStorage.getItem('user');
-    if (token && userData) {
+    
+    // Check if both token and userData exist and are not "undefined" strings
+    if (token && userData && userData !== 'undefined' && userData !== 'null') {
       try {
-        setUser(JSON.parse(userData));
-        axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        const parsedUser = JSON.parse(userData);
+        if (parsedUser && typeof parsedUser === 'object') {
+          setUser(parsedUser);
+          axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+        } else {
+          throw new Error('Invalid user data format');
+        }
       } catch (error) {
         console.error('Error parsing user data:', error);
+        // Clean up invalid data
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      }
+    } else {
+      // Clean up any invalid data
+      if (!token) localStorage.removeItem('user');
+      if (!userData || userData === 'undefined' || userData === 'null') {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
       }
