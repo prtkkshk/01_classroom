@@ -25,30 +25,71 @@ const AuthProvider = ({ children }) => {
     setLoading(false);
   }, []);
 
+  // Update the login function to handle errors better
   const login = async (username, password) => {
     try {
-      const response = await axios.post(`${API}/login`, { 
-        username, 
-        password,
-        session_id: sessionId  // Add session identifier
-      });
+      console.log('Attempting login to:', `${API}/login`); // Debug log
+      
+      const response = await axios.post(`${API}/login`, { username, password });
+      
+      console.log('Login response:', response); // Debug log
+      
+      if (!response.data) {
+        throw new Error('No data received from server');
+      }
+      
       const { access_token, user: userData } = response.data;
+      
+      if (!access_token || !userData) {
+        throw new Error('Invalid response format');
+      }
       
       localStorage.setItem('token', access_token);
       localStorage.setItem('user', JSON.stringify(userData));
-      localStorage.setItem('session_id', sessionId);
       axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
       setUser(userData);
       return { success: true };
     } catch (error) {
-      return { success: false, error: error.response?.data?.detail || 'Login failed' };
+      console.error('Login error details:', {
+        message: error.message,
+        response: error.response,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+      
+      if (error.response?.status === 404) {
+        return { success: false, error: 'API endpoint not found. Please check backend URL.' };
+      }
+      
+      if (error.response?.status === 0) {
+        return { success: false, error: 'Cannot connect to server. Please check if backend is running.' };
+      }
+      
+      return { 
+        success: false, 
+        error: error.response?.data?.detail || error.message || 'Login failed' 
+      };
     }
   };
 
+  // Update the register function similarly
   const register = async (username, email, password) => {
     try {
+      console.log('Attempting registration to:', `${API}/register`); // Debug log
+      
       const response = await axios.post(`${API}/register`, { username, email, password });
+      
+      console.log('Register response:', response); // Debug log
+      
+      if (!response.data) {
+        throw new Error('No data received from server');
+      }
+      
       const { access_token, user: userData } = response.data;
+      
+      if (!access_token || !userData) {
+        throw new Error('Invalid response format');
+      }
       
       localStorage.setItem('token', access_token);
       localStorage.setItem('user', JSON.stringify(userData));
@@ -56,7 +97,25 @@ const AuthProvider = ({ children }) => {
       setUser(userData);
       return { success: true };
     } catch (error) {
-      return { success: false, error: error.response?.data?.detail || 'Registration failed' };
+      console.error('Register error details:', {
+        message: error.message,
+        response: error.response,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+      
+      if (error.response?.status === 404) {
+        return { success: false, error: 'API endpoint not found. Please check backend URL.' };
+      }
+      
+      if (error.response?.status === 0) {
+        return { success: false, error: 'Cannot connect to server. Please check if backend is running.' };
+      }
+      
+      return { 
+        success: false, 
+        error: error.response?.data?.detail || error.message || 'Registration failed' 
+      };
     }
   };
 
@@ -1404,6 +1463,76 @@ const Dashboard = () => {
   }
   
   return <Navigate to="/login" replace />;
+};
+
+// Add axios interceptors for better error handling
+axios.interceptors.response.use(
+  (response) => {
+    return response;
+  },
+  (error) => {
+    console.error('Axios error:', {
+      config: error.config,
+      response: error.response,
+      message: error.message
+    });
+    
+    // If response is undefined, it means network error
+    if (!error.response) {
+      console.error('Network error - no response received');
+      return Promise.reject(new Error('Network error - cannot connect to server'));
+    }
+    
+    return Promise.reject(error);
+  }
+);
+
+// Add this component to test backend connection
+const BackendTest = () => {
+  const [status, setStatus] = useState('Testing...');
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const testBackend = async () => {
+      try {
+        console.log('Testing backend URL:', BACKEND_URL);
+        const response = await axios.get(BACKEND_URL);
+        console.log('Backend test response:', response);
+        setStatus('Backend is running!');
+      } catch (error) {
+        console.error('Backend test error:', error);
+        setError(error.message);
+        setStatus('Backend test failed');
+      }
+    };
+
+    testBackend();
+  }, []);
+
+  return (
+    <div style={{ padding: '10px', margin: '10px', border: '1px solid #ccc' }}>
+      <h3>Backend Status: {status}</h3>
+      {error && <p style={{ color: 'red' }}>Error: {error}</p>}
+      <p>Backend URL: {BACKEND_URL}</p>
+      <p>API URL: {API}</p>
+    </div>
+  );
+};
+
+// Add this to your Login component temporarily
+const Login = () => {
+  // ... existing code ...
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center p-4">
+      {/* Add this temporarily for debugging */}
+      <BackendTest />
+      
+      <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
+        {/* ... rest of your login form ... */}
+      </div>
+    </div>
+  );
 };
 
 export default App;
