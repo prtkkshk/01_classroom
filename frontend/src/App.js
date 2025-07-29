@@ -1267,6 +1267,16 @@ const StudentDashboard = () => {
               >
                 Polls
               </button>
+              <button
+                onClick={() => setActiveTab('announcements')}
+                className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm ${
+                  activeTab === 'announcements'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Announcements
+              </button>
             </nav>
           </div>
 
@@ -1410,27 +1420,30 @@ const StudentDashboard = () => {
                 </div>
               </div>
             )}
+
+            {activeTab === 'announcements' && (
+              <div>
+                <h2 className="text-xl font-semibold mb-6">Announcements</h2>
+                
+                {announcementError && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 mb-6">
+                    {announcementError}
+                  </div>
+                )}
+
+                {announcementLoading ? (
+                  <div className="text-gray-500">Loading announcements...</div>
+                ) : (
+                  <AnnouncementList announcements={announcements} />
+                )}
+
+                {(user.role === 'professor' || user.role === 'moderator') && (
+                  <AnnouncementForm onCreate={handleCreateAnnouncement} loading={announcementLoading} />
+                )}
+              </div>
+            )}
           </div>
         </div>
-      </div>
-
-      {/* Announcement UI for Course Dashboard */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {announcementError && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 mb-6">
-            {announcementError}
-          </div>
-        )}
-
-        {announcementLoading ? (
-          <div className="text-gray-500">Loading announcements...</div>
-        ) : (
-          <AnnouncementList announcements={announcements} />
-        )}
-
-        {(user.role === 'professor' || user.role === 'moderator') && (
-          <AnnouncementForm onCreate={handleCreateAnnouncement} loading={announcementLoading} />
-        )}
       </div>
     </div>
   );
@@ -1653,6 +1666,16 @@ const ProfessorDashboard = () => {
               >
                 Polls
               </button>
+              <button
+                onClick={() => setActiveTab('announcements')}
+                className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm ${
+                  activeTab === 'announcements'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Announcements
+              </button>
             </nav>
           </div>
 
@@ -1776,27 +1799,30 @@ const ProfessorDashboard = () => {
                 </div>
               </div>
             )}
+
+            {activeTab === 'announcements' && (
+              <div>
+                <h2 className="text-xl font-semibold mb-6">Announcements</h2>
+                
+                {announcementError && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 mb-6">
+                    {announcementError}
+                  </div>
+                )}
+
+                {announcementLoading ? (
+                  <div className="text-gray-500">Loading announcements...</div>
+                ) : (
+                  <AnnouncementList announcements={announcements} />
+                )}
+
+                {(user.role === 'professor' || user.role === 'moderator') && (
+                  <AnnouncementForm onCreate={handleCreateAnnouncement} loading={announcementLoading} />
+                )}
+              </div>
+            )}
           </div>
         </div>
-      </div>
-
-      {/* Announcement UI for Course Dashboard */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {announcementError && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 mb-6">
-            {announcementError}
-          </div>
-        )}
-
-        {announcementLoading ? (
-          <div className="text-gray-500">Loading announcements...</div>
-        ) : (
-          <AnnouncementList announcements={announcements} />
-        )}
-
-        {(user.role === 'professor' || user.role === 'moderator') && (
-          <AnnouncementForm onCreate={handleCreateAnnouncement} loading={announcementLoading} />
-        )}
       </div>
     </div>
   );
