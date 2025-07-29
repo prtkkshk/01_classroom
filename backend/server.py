@@ -17,6 +17,7 @@ from passlib.context import CryptContext
 import json
 from collections import defaultdict
 import asyncio
+from fastapi.responses import JSONResponse
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -30,6 +31,9 @@ db = client[os.environ.get('DB_NAME', 'classroom_live')]
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-here-change-in-production')
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+if SECRET_KEY == 'your-secret-key-here-change-in-production':
+    logging.warning("[SECURITY] SECRET_KEY is using the default value! Set SECRET_KEY in your environment for production.")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
@@ -448,7 +452,13 @@ async def register(user_data: UserCreate):
         user_dict.pop("password")
         
         user_obj = User(**user_dict)
-        await db.users.insert_one(user_obj.dict())
+        try:
+            await db.users.insert_one(user_obj.dict())
+        except Exception as e:
+            # Handle duplicate key error (race condition)
+            if "duplicate key error" in str(e):
+                raise HTTPException(status_code=400, detail="Email or roll number already registered")
+            raise
         
         # Create access token
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -1600,22 +1610,28 @@ async def read_root():
 # Error handlers
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
-    return {
-        "error": True,
-        "message": exc.detail,
-        "status_code": exc.status_code,
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": True,
+            "message": exc.detail,
+            "status_code": exc.status_code,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    )
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
     logger.error(f"Unhandled exception: {str(exc)}")
-    return {
-        "error": True,
-        "message": "Internal server error",
-        "status_code": 500,
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": True,
+            "message": "Internal server error",
+            "status_code": 500,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    )
 
 if __name__ == "__main__":
     import uvicorn
