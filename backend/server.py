@@ -1068,13 +1068,13 @@ app.include_router(api_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:3001",
         "https://zero1-classroom-1.onrender.com",
-        "https://zero1-classroom-2.onrender.com"
+        "https://zero1-classroom-2.onrender.com",  # <--- THIS IS NEEDED!
     ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
