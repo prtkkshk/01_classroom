@@ -1469,13 +1469,10 @@ async def cleanup_expired_sessions():
     """Clean up expired sessions periodically"""
     while True:
         try:
-            # Clean up database sessions (if using database session manager)
             expired_count = 0
             current_time = datetime.utcnow()
-            
-            # Remove expired tokens from session manager
             expired_tokens = []
-            for token, user_data in session_manager.active_sessions.items():
+            for token, user_data in list(session_manager.active_sessions.items()):
                 try:
                     payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
                     exp = payload.get("exp")
@@ -1483,17 +1480,12 @@ async def cleanup_expired_sessions():
                         expired_tokens.append(token)
                 except jwt.PyJWTError:
                     expired_tokens.append(token)
-            
             for token in expired_tokens:
                 session_manager.remove_session(token)
                 expired_count += 1
-            
             if expired_count > 0:
                 logger.info(f"Cleaned up {expired_count} expired sessions")
-            
-            # Wait 1 hour before next cleanup
-            await asyncio.sleep(3600)
-            
+            await asyncio.sleep(3600)  # 1 hour
         except Exception as e:
             logger.error(f"Session cleanup error: {str(e)}")
             await asyncio.sleep(300)  # Wait 5 minutes on error
@@ -1503,20 +1495,15 @@ async def deactivate_expired_polls():
     while True:
         try:
             current_time = datetime.utcnow()
-            
-            # Find and deactivate expired polls
             expired_polls = await db.polls.find({
                 "expires_at": {"$lt": current_time},
                 "is_active": True
             }).to_list(1000)
-            
             for poll in expired_polls:
                 await db.polls.update_one(
                     {"id": poll["id"]},
                     {"$set": {"is_active": False}}
                 )
-                
-                # Notify course participants
                 await manager.broadcast_to_course(
                     poll["course_id"],
                     json.dumps({
@@ -1524,88 +1511,52 @@ async def deactivate_expired_polls():
                         "poll_id": poll["id"]
                     })
                 )
-            
             if expired_polls:
                 logger.info(f"Deactivated {len(expired_polls)} expired polls")
-            
-            # Wait 10 minutes before next check
-            await asyncio.sleep(600)
-            
+            await asyncio.sleep(600)  # 10 minutes
         except Exception as e:
             logger.error(f"Poll expiration check error: {str(e)}")
             await asyncio.sleep(300)
+
+# NOTE: SessionManager is in-memory and will lose all sessions on server restart. For production, use a persistent store.
+# NOTE: Background tasks will run in each process if using multiple workers (e.g., gunicorn), which may cause race conditions.
 
 # Startup and shutdown events
 @app.on_event("startup")
 async def startup_event():
     logger.info("Starting Classroom Live API...")
-    
-    # Create database indexes for better performance
     try:
-        # User indexes
         await db.users.create_index("email", unique=True)
         await db.users.create_index("roll_number", unique=True, sparse=True)
         await db.users.create_index("userid", unique=True, sparse=True)
-        
-        # Course indexes
         await db.courses.create_index("code", unique=True)
         await db.courses.create_index("professor_id")
         await db.courses.create_index("is_active")
-        
-        # Question indexes
         await db.questions.create_index([("course_id", 1), ("created_at", -1)])
         await db.questions.create_index("user_id")
         await db.questions.create_index("is_answered")
-        
-        # Poll indexes
         await db.polls.create_index([("course_id", 1), ("created_at", -1)])
         await db.polls.create_index("created_by")
         await db.polls.create_index("is_active")
         await db.polls.create_index("expires_at")
-        
-        # Vote indexes
         await db.votes.create_index([("poll_id", 1), ("user_id", 1)], unique=True)
         await db.votes.create_index("poll_id")
-        
-        # Announcement indexes
         await db.announcements.create_index([("course_id", 1), ("created_at", -1)])
         await db.announcements.create_index("expires_at")
-        
         logger.info("Database indexes created successfully")
-        
     except Exception as e:
         logger.warning(f"Index creation warning: {str(e)}")
-    
-    # Start background tasks
     asyncio.create_task(cleanup_expired_sessions())
     asyncio.create_task(deactivate_expired_polls())
-    
     logger.info("Classroom Live API started successfully")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Shutting down Classroom Live API...")
-    
-    # Close database connection
     client.close()
-    
-    # Clear session manager
     session_manager.active_sessions.clear()
     session_manager.user_sessions.clear()
-    
     logger.info("Classroom Live API shutdown complete")
-
-# Root endpoint
-@app.get("/")
-async def read_root():
-    return {
-        "message": "Welcome to Classroom Live API v2.0.0",
-        "status": "running",
-        "docs": "/docs",
-        "redoc": "/redoc",
-        "health": "/api/health",
-        "info": "/api/info"
-    }
 
 # Error handlers
 @app.exception_handler(HTTPException)
