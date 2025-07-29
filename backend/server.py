@@ -18,6 +18,7 @@ import json
 from collections import defaultdict
 import asyncio
 from fastapi.responses import JSONResponse
+from bson import ObjectId
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -654,7 +655,7 @@ async def get_courses(current_user: User = Depends(get_current_user)):
         courses = await db.courses.find({"is_active": True}).to_list(1000)
     else:
         raise HTTPException(status_code=403, detail="Invalid role")
-    
+    courses = fix_mongo_ids(courses)
     return [Course(**course) for course in courses]
 
 @api_router.post("/courses/join")
@@ -778,7 +779,7 @@ async def get_questions(course_id: str = None, current_user: User = Depends(get_
         if current_user.role != "moderator":
             raise HTTPException(status_code=400, detail="Course ID is required")
         questions = await db.questions.find().sort([("priority", -1), ("created_at", -1)]).to_list(1000)
-    
+    questions = fix_mongo_ids(questions)
     return [Question(**question) for question in questions]
 
 @api_router.get("/questions/my", response_model=List[Question])
@@ -791,6 +792,7 @@ async def get_my_questions(course_id: str = None, current_user: User = Depends(g
         query["course_id"] = course_id
     
     questions = await db.questions.find(query).sort("created_at", -1).to_list(1000)
+    questions = fix_mongo_ids(questions)
     return [Question(**question) for question in questions]
 
 @api_router.put("/questions/{question_id}", response_model=Question)
@@ -921,7 +923,7 @@ async def get_polls(course_id: str = None, current_user: User = Depends(get_curr
         if current_user.role != "moderator":
             raise HTTPException(status_code=400, detail="Course ID is required")
         polls = await db.polls.find({"is_active": True}).sort("created_at", -1).to_list(1000)
-    
+    polls = fix_mongo_ids(polls)
     return [Poll(**poll) for poll in polls]
 
 @api_router.post("/polls/{poll_id}/vote")
@@ -1100,7 +1102,7 @@ async def get_announcements(course_id: str = None, current_user: User = Depends(
         if current_user.role != "moderator":
             raise HTTPException(status_code=400, detail="Course ID is required")
         announcements = await db.announcements.find().sort([("priority", -1), ("created_at", -1)]).to_list(1000)
-    
+    announcements = fix_mongo_ids(announcements)
     return [Announcement(**announcement) for announcement in announcements]
 
 @api_router.delete("/announcements/{announcement_id}")
@@ -1172,6 +1174,14 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
         "user": user_data_dict
     }
 
+def fix_mongo_ids(doc):
+    # Recursively convert ObjectId to str in a dict or list
+    if isinstance(doc, list):
+        return [fix_mongo_ids(item) for item in doc]
+    if isinstance(doc, dict):
+        return {k: (str(v) if isinstance(v, ObjectId) else fix_mongo_ids(v)) for k, v in doc.items()}
+    return doc
+
 @api_router.get("/admin/users")
 async def get_all_users(current_user: User = Depends(get_current_user)):
     if current_user.role != "moderator":
@@ -1183,6 +1193,7 @@ async def get_all_users(current_user: User = Depends(get_current_user)):
     for user in users:
         user.pop("password_hash", None)
     
+    users = fix_mongo_ids(users)
     return {"users": users, "total_count": len(users)}
 
 @api_router.delete("/admin/users/{user_id}")
@@ -1380,8 +1391,8 @@ async def delete_any_poll(poll_id: str, current_user: User = Depends(get_current
 async def get_all_votes(current_user: User = Depends(get_current_user)):
     if current_user.role != "moderator":
         raise HTTPException(status_code=403, detail="Only moderators can access this endpoint")
-    
     votes = await db.votes.find().sort("created_at", -1).to_list(1000)
+    votes = fix_mongo_ids(votes)
     return {"votes": votes, "total_count": len(votes)}
 
 @api_router.delete("/admin/votes/{vote_id}")
