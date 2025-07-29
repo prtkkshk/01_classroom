@@ -55,10 +55,21 @@ class User(BaseModel):
     email: str
     password_hash: str
     role: str  # "student" or "professor"
+    name: str
+    roll_number: Optional[str] = None  # For students
+    userid: Optional[str] = None  # For professors
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class UserCreate(BaseModel):
     username: str
+    email: str
+    password: str
+    name: str
+    roll_number: str
+
+class UserCreateProfessor(BaseModel):
+    name: str
+    userid: str
     email: str
     password: str
 
@@ -323,6 +334,11 @@ async def register(user_data: UserCreate):
     if existing_email:
         raise HTTPException(status_code=400, detail="Email already registered")
     
+    # Check if roll number already exists
+    existing_roll = await db.users.find_one({"roll_number": user_data.roll_number})
+    if existing_roll:
+        raise HTTPException(status_code=400, detail="Roll number already registered")
+    
     # Create new user
     user_dict = user_data.dict()
     user_dict["password_hash"] = get_password_hash(user_data.password)
@@ -342,7 +358,9 @@ async def register(user_data: UserCreate):
         "id": user_obj.id,
         "username": user_obj.username,
         "email": user_obj.email,
-        "role": user_obj.role
+        "role": user_obj.role,
+        "name": user_obj.name,
+        "roll_number": user_obj.roll_number
     }
     
     # Add to session manager
@@ -379,7 +397,10 @@ async def login(user_credentials: UserLogin):
             "id": moderator["id"],
             "username": moderator["username"],
             "email": moderator["email"],
-            "role": moderator["role"]
+            "role": moderator["role"],
+            "name": moderator.get("name", "Moderator"),
+            "roll_number": moderator.get("roll_number"),
+            "userid": moderator.get("userid")
         }
         
         # Add to session manager
@@ -414,7 +435,10 @@ async def login(user_credentials: UserLogin):
             "id": professor["id"],
             "username": professor["username"],
             "email": professor["email"],
-            "role": professor["role"]
+            "role": professor["role"],
+            "name": professor.get("name", "Professor"),
+            "roll_number": professor.get("roll_number"),
+            "userid": professor.get("userid")
         }
         
         # Add to session manager
@@ -444,7 +468,10 @@ async def login(user_credentials: UserLogin):
         "id": user["id"],
         "username": user["username"],
         "email": user["email"],
-        "role": user["role"]
+        "role": user["role"],
+        "name": user.get("name", ""),
+        "roll_number": user.get("roll_number"),
+        "userid": user.get("userid")
     }
     
     # Add to session manager
@@ -910,6 +937,56 @@ async def get_active_sessions(current_user: User = Depends(get_current_user)):
         "total_active_sessions": session_count,
         "unique_users": len(user_session_count),
         "sessions_per_user": dict(user_session_count)
+    }
+
+@api_router.post("/admin/create-professor", response_model=Token)
+async def create_professor(professor_data: UserCreateProfessor, current_user: User = Depends(get_current_user)):
+    # Check if current user is moderator
+    if current_user.role != "moderator":
+        raise HTTPException(status_code=403, detail="Only moderators can create professor accounts")
+    
+    # Check if email already exists
+    existing_email = await db.users.find_one({"email": professor_data.email})
+    if existing_email:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Check if userid already exists
+    existing_userid = await db.users.find_one({"userid": professor_data.userid})
+    if existing_userid:
+        raise HTTPException(status_code=400, detail="User ID already registered")
+    
+    # Create professor user
+    professor_dict = professor_data.dict()
+    professor_dict["password_hash"] = get_password_hash(professor_data.password)
+    professor_dict["role"] = "professor"
+    professor_dict["username"] = professor_data.userid  # Use userid as username
+    professor_dict.pop("password")
+    
+    professor_obj = User(**professor_dict)
+    await db.users.insert_one(professor_obj.dict())
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": professor_obj.username}, expires_delta=access_token_expires
+    )
+    
+    user_data_dict = {
+        "id": professor_obj.id,
+        "username": professor_obj.username,
+        "email": professor_obj.email,
+        "role": professor_obj.role,
+        "name": professor_obj.name,
+        "userid": professor_obj.userid
+    }
+    
+    # Add to session manager
+    session_manager.add_session(access_token, user_data_dict)
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user_data_dict
     }
 
 # Include the router in the main app
