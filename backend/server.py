@@ -1139,6 +1139,9 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
     if current_user.role != "moderator":
         raise HTTPException(status_code=403, detail="Only moderators can create professor accounts")
     
+    # Force redeployment - Professor creation fix with timestamp-based roll numbers
+    # This comment ensures the backend redeploys with the latest changes
+
     # Debug: Log the incoming data
     logger.info(f"Creating professor: {professor_data.email}, {professor_data.userid}")
     
@@ -1156,7 +1159,10 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
         professor_dict = professor_data.dict()
         professor_dict["password_hash"] = get_password_hash(professor_data.password)
         professor_dict["role"] = "professor"
-        # Don't set roll_number to None explicitly - let it be Optional
+        # Assign a unique timestamp-based roll number for professors to avoid duplicate key issues
+        import time
+        timestamp = int(time.time() * 1000)  # Use milliseconds for more uniqueness
+        professor_dict["roll_number"] = f"PROF_{timestamp}"
         professor_dict.pop("password")
         
         professor_obj = User(**professor_dict)
