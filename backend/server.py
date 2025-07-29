@@ -51,17 +51,15 @@ MODERATOR_PASSWORD = "pepper_14627912"
 # Pydantic Models
 class User(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    username: str
     email: str
     password_hash: str
     role: str  # "student" or "professor"
     name: str
-    roll_number: Optional[str] = None  # For students
-    userid: Optional[str] = None  # For professors
+    roll_number: Optional[str] = None  # For students (acts as username)
+    userid: Optional[str] = None  # For professors (acts as username)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class UserCreate(BaseModel):
-    username: str
     email: str
     password: str
     name: str
@@ -316,7 +314,11 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     except jwt.PyJWTError:
         raise credentials_exception
     
-    user = await db.users.find_one({"username": username})
+    # Try to find user by roll_number first (students), then by userid (professors)
+    user = await db.users.find_one({"roll_number": username})
+    if not user:
+        user = await db.users.find_one({"userid": username})
+    
     if user is None:
         raise credentials_exception
     
@@ -325,19 +327,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 # Auth Routes
 @api_router.post("/register", response_model=Token)
 async def register(user_data: UserCreate):
-    # Check if user already exists
-    existing_user = await db.users.find_one({"username": user_data.username})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
+    # Check if roll number already exists (acts as username)
+    existing_roll = await db.users.find_one({"roll_number": user_data.roll_number})
+    if existing_roll:
+        raise HTTPException(status_code=400, detail="Roll number already registered")
     
     existing_email = await db.users.find_one({"email": user_data.email})
     if existing_email:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Check if roll number already exists
-    existing_roll = await db.users.find_one({"roll_number": user_data.roll_number})
-    if existing_roll:
-        raise HTTPException(status_code=400, detail="Roll number already registered")
     
     # Create new user
     user_dict = user_data.dict()
@@ -351,12 +348,12 @@ async def register(user_data: UserCreate):
     # Create access token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user_obj.username}, expires_delta=access_token_expires
+        data={"sub": user_obj.roll_number}, expires_delta=access_token_expires
     )
     
     user_data_dict = {
         "id": user_obj.id,
-        "username": user_obj.username,
+        "username": user_obj.roll_number,  # Use roll_number as username for compatibility
         "email": user_obj.email,
         "role": user_obj.role,
         "name": user_obj.name,
@@ -450,23 +447,30 @@ async def login(user_credentials: UserLogin):
             "user": user_data_dict
         }
     
-    # Regular student login
-    user = await db.users.find_one({"username": user_credentials.username})
+    # Regular student login - try roll_number first, then userid for professors
+    user = await db.users.find_one({"roll_number": user_credentials.username})
+    if not user:
+        # Try userid for professors
+        user = await db.users.find_one({"userid": user_credentials.username})
+    
     if not user or not verify_password(user_credentials.password, user["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
+            detail="Incorrect roll number/user ID or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    # Determine the username field based on role
+    username_field = user.get("roll_number") if user["role"] == "student" else user.get("userid")
+    
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user["username"]}, expires_delta=access_token_expires
+        data={"sub": username_field}, expires_delta=access_token_expires
     )
     
     user_data_dict = {
         "id": user["id"],
-        "username": user["username"],
+        "username": username_field,  # Use roll_number for students, userid for professors
         "email": user["email"],
         "role": user["role"],
         "name": user.get("name", ""),
@@ -959,7 +963,6 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
     professor_dict = professor_data.dict()
     professor_dict["password_hash"] = get_password_hash(professor_data.password)
     professor_dict["role"] = "professor"
-    professor_dict["username"] = professor_data.userid  # Use userid as username
     professor_dict.pop("password")
     
     professor_obj = User(**professor_dict)
@@ -968,12 +971,12 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
     # Create access token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": professor_obj.username}, expires_delta=access_token_expires
+        data={"sub": professor_obj.userid}, expires_delta=access_token_expires
     )
     
     user_data_dict = {
         "id": professor_obj.id,
-        "username": professor_obj.username,
+        "username": professor_obj.userid,  # Use userid as username for compatibility
         "email": professor_obj.email,
         "role": professor_obj.role,
         "name": professor_obj.name,
