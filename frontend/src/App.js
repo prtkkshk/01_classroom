@@ -1564,30 +1564,33 @@ const CourseSelection = () => {
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center">
-              <img 
-                src={`${process.env.PUBLIC_URL}/Untitled_design__2_-removebg-preview.png`} 
-                alt="Classroom Logo" 
-                style={{ width: 36, height: 36, marginRight: 8 }} 
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                }}
-              />
-              <h1 className="text-2xl font-bold text-gray-900">Classroom</h1>
-              <span className={`ml-3 px-3 py-1 rounded-full text-sm font-medium ${
-                user.role === 'student' ? 'bg-blue-100 text-blue-800' :
-                user.role === 'professor' ? 'bg-purple-100 text-purple-800' :
-                'bg-red-100 text-red-800'
-              }`}>
-                {user.role}
-              </span>
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-4 gap-3">
+            <div className="flex items-center justify-between sm:justify-start">
+              <div className="flex items-center">
+                <img 
+                  src={`${process.env.PUBLIC_URL}/Untitled_design__2_-removebg-preview.png`} 
+                  alt="Classroom Logo" 
+                  style={{ width: 32, height: 32, marginRight: 8 }} 
+                  className="sm:w-9 sm:h-9"
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                  }}
+                />
+                <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Classroom</h1>
+                <span className={`ml-2 sm:ml-3 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium ${
+                  user.role === 'student' ? 'bg-blue-100 text-blue-800' :
+                  user.role === 'professor' ? 'bg-purple-100 text-purple-800' :
+                  'bg-red-100 text-red-800'
+                }`}>
+                  {user.role}
+                </span>
+              </div>
             </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-gray-700">Hello, {user.username}!</span>
+            <div className="flex items-center justify-between sm:justify-end gap-3">
+              <span className="text-sm sm:text-base text-gray-700">Hello, {user.username}!</span>
               <button
                 onClick={logout}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+                className="bg-red-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm"
               >
                 Logout
               </button>
@@ -1596,27 +1599,29 @@ const CourseSelection = () => {
         </div>
       </nav>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <h2 className="text-3xl font-bold text-gray-900 mb-4">My Courses</h2>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8">
+        <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+          <h2 className="text-2xl sm:text-3xl font-bold text-gray-900">My Courses</h2>
           
-          {user.role === 'professor' && (
-            <button
-              onClick={() => setShowCreateForm(true)}
-              className="bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition-colors mr-4"
-            >
-              Create New Course
-            </button>
-          )}
-          
-          {user.role === 'student' && (
-            <button
-              onClick={() => setShowJoinForm(true)}
-              className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors"
-            >
-              Join Course
-            </button>
-          )}
+          <div>
+            {user.role === 'professor' && (
+              <button
+                onClick={() => setShowCreateForm(true)}
+                className="w-full sm:w-auto bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition-colors"
+              >
+                Create New Course
+              </button>
+            )}
+            
+            {user.role === 'student' && (
+              <button
+                onClick={() => setShowJoinForm(true)}
+                className="w-full sm:w-auto bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors"
+              >
+                Join Course
+              </button>
+            )}
+          </div>
         </div>
 
         {error && (
@@ -1634,7 +1639,7 @@ const CourseSelection = () => {
         {/* Create Course Modal */}
         {showCreateForm && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-md mx-4">
               <h3 className="text-lg font-semibold mb-4">Create New Course</h3>
               <form onSubmit={handleCreateCourse} className="space-y-4">
                 <div>
@@ -1672,7 +1677,7 @@ const CourseSelection = () => {
         {/* Join Course Modal */}
         {showJoinForm && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="bg-white rounded-lg p-4 sm:p-6 w-full max-w-md mx-4">
               <h3 className="text-lg font-semibold mb-4">Join Course</h3>
               <form onSubmit={handleJoinCourse} className="space-y-4">
                 <div>
@@ -1709,20 +1714,22 @@ const CourseSelection = () => {
         )}
 
         {/* Courses Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {courses.map((course) => (
-            <div key={course.id} className="bg-white rounded-lg shadow-sm border p-6">
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-xl font-semibold text-gray-900">{course.name}</h3>
-                  <p className="text-sm text-gray-600">Code: {course.code}</p>
-                  <p className="text-sm text-gray-600">Professor: {course.professor_name}</p>
-                  <p className="text-sm text-gray-600">Students: {course.students?.length || 0}</p>
+            <div key={course.id} className="bg-white rounded-lg shadow-sm border p-4 sm:p-6">
+              <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4">
+                <div className="flex-1">
+                  <h3 className="text-lg sm:text-xl font-semibold text-gray-900 mb-2">{course.name}</h3>
+                  <div className="space-y-1">
+                    <p className="text-sm text-gray-600">Code: <span className="font-mono bg-gray-100 px-2 py-1 rounded text-xs">{course.code}</span></p>
+                    <p className="text-sm text-gray-600">Professor: {course.professor_name}</p>
+                    <p className="text-sm text-gray-600">Students: {course.students?.length || 0}</p>
+                  </div>
                 </div>
                 {user.role === 'professor' && course.professor_id === user.id && (
                   <button
                     onClick={() => handleDeleteCourse(course.id)}
-                    className="text-red-600 hover:text-red-800 text-sm"
+                    className="text-red-600 hover:text-red-800 text-sm self-start"
                   >
                     Delete
                   </button>
@@ -1730,7 +1737,7 @@ const CourseSelection = () => {
               </div>
               <button
                 onClick={() => handleEnterCourse(course)}
-                className="w-full bg-indigo-600 text-white py-2 px-4 rounded-lg hover:bg-indigo-700 transition-colors"
+                className="w-full bg-indigo-600 text-white py-3 px-4 rounded-lg hover:bg-indigo-700 transition-colors text-sm sm:text-base"
               >
                 Enter Course
               </button>
@@ -1739,8 +1746,8 @@ const CourseSelection = () => {
         </div>
 
         {courses.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-gray-500 text-lg">
+          <div className="text-center py-8 sm:py-12">
+            <p className="text-gray-500 text-base sm:text-lg px-4">
               {user.role === 'professor' 
                 ? 'You haven\'t created any courses yet. Create your first course to get started!'
                 : 'You haven\'t joined any courses yet. Join a course using a course code!'
@@ -2052,10 +2059,10 @@ const StudentDashboard = () => {
 
         <div className="bg-white rounded-lg shadow-sm mb-8">
           <div className="border-b">
-            <nav className="flex space-x-8 px-6">
+            <nav className="flex flex-wrap space-x-4 sm:space-x-8 px-4 sm:px-6">
               <button
                 onClick={() => setActiveTab('questions')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm ${
                   activeTab === 'questions'
                     ? 'border-indigo-500 text-indigo-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2065,7 +2072,7 @@ const StudentDashboard = () => {
               </button>
               <button
                 onClick={() => setActiveTab('forum')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm ${
                   activeTab === 'forum'
                     ? 'border-indigo-500 text-indigo-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2075,7 +2082,7 @@ const StudentDashboard = () => {
               </button>
               <button
                 onClick={() => setActiveTab('polls')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm ${
                   activeTab === 'polls'
                     ? 'border-indigo-500 text-indigo-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2086,10 +2093,10 @@ const StudentDashboard = () => {
             </nav>
           </div>
 
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             {activeTab === 'questions' && (
-              <div className="space-y-8">
-                <div className="bg-gray-50 rounded-lg p-6">
+              <div className="space-y-6 sm:space-y-8">
+                <div className="bg-gray-50 rounded-lg p-4 sm:p-6">
                   <h2 className="text-xl font-semibold mb-4">
                     {editingQuestion ? 'Edit Question' : 'Ask a Question'}
                   </h2>
