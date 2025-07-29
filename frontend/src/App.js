@@ -1893,7 +1893,7 @@ const StudentDashboard = () => {
 
   const fetchQuestions = async () => {
     try {
-      const response = await axios.get(`${API}/questions`);
+      const response = await axios.get(`${API}/questions?course_id=${currentCourse.id}`);
       setQuestions(response.data);
     } catch (error) {
       console.error('Error fetching questions:', error);
@@ -1902,7 +1902,7 @@ const StudentDashboard = () => {
 
   const fetchMyQuestions = async () => {
     try {
-      const response = await axios.get(`${API}/questions/my`);
+      const response = await axios.get(`${API}/questions/my?course_id=${currentCourse.id}`);
       setMyQuestions(response.data);
     } catch (error) {
       console.error('Error fetching my questions:', error);
@@ -1911,7 +1911,7 @@ const StudentDashboard = () => {
 
   const fetchPolls = async () => {
     try {
-      const response = await axios.get(`${API}/polls`);
+      const response = await axios.get(`${API}/polls?course_id=${currentCourse.id}`);
       setPolls(response.data);
     } catch (error) {
       console.error('Error fetching polls:', error);
@@ -1934,6 +1934,7 @@ const StudentDashboard = () => {
       } else {
         await axios.post(`${API}/questions`, {
           question_text: questionText,
+          course_id: currentCourse.id,
           is_anonymous: isAnonymous
         });
         setSuccess('Question submitted successfully!');
@@ -2256,7 +2257,7 @@ const ProfessorDashboard = () => {
 
   const fetchQuestions = async () => {
     try {
-      const response = await axios.get(`${API}/questions`);
+      const response = await axios.get(`${API}/questions?course_id=${currentCourse.id}`);
       setQuestions(response.data);
     } catch (error) {
       console.error('Error fetching questions:', error);
@@ -2265,7 +2266,7 @@ const ProfessorDashboard = () => {
 
   const fetchPolls = async () => {
     try {
-      const response = await axios.get(`${API}/polls`);
+      const response = await axios.get(`${API}/polls?course_id=${currentCourse.id}`);
       setPolls(response.data);
     } catch (error) {
       console.error('Error fetching polls:', error);
@@ -2293,6 +2294,7 @@ const ProfessorDashboard = () => {
     try {
       await axios.post(`${API}/polls`, {
         question: pollQuestion,
+        course_id: currentCourse.id,
         options: pollOptions.filter(option => option.trim() !== '')
       });
       
