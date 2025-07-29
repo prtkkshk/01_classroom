@@ -76,12 +76,14 @@ class Question(BaseModel):
     question_text: str
     user_id: str
     username: str
+    course_id: str  # Add course_id field
     is_anonymous: bool = False
     is_answered: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class QuestionCreate(BaseModel):
     question_text: str
+    course_id: str  # Add course_id field
     is_anonymous: bool = False
 
 class QuestionUpdate(BaseModel):
@@ -92,12 +94,14 @@ class Poll(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     question: str
     options: List[str]
+    course_id: str  # Add course_id field
     created_by: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class PollCreate(BaseModel):
     question: str
     options: List[str]
+    course_id: str  # Add course_id field
 
 class Vote(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -464,6 +468,14 @@ async def create_question(question_data: QuestionCreate, current_user: User = De
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="Only students can ask questions")
     
+    # Verify user is enrolled in the course
+    course = await db.courses.find_one({"id": question_data.course_id})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    if current_user.id not in course["students"]:
+        raise HTTPException(status_code=403, detail="You must be enrolled in this course to ask questions")
+    
     question_dict = question_data.dict()
     question_dict["user_id"] = current_user.id
     question_dict["username"] = current_user.username if not question_data.is_anonymous else "Anonymous"
@@ -480,16 +492,28 @@ async def create_question(question_data: QuestionCreate, current_user: User = De
     return question_obj
 
 @api_router.get("/questions", response_model=List[Question])
-async def get_questions(current_user: User = Depends(get_current_user)):
-    questions = await db.questions.find().sort("created_at", -1).to_list(1000)
+async def get_questions(course_id: str = None, current_user: User = Depends(get_current_user)):
+    if course_id:
+        # Get questions for specific course
+        questions = await db.questions.find({"course_id": course_id}).sort("created_at", -1).to_list(1000)
+    else:
+        # Get all questions (for moderators or when no course specified)
+        if current_user.role != "moderator":
+            raise HTTPException(status_code=400, detail="Course ID is required")
+        questions = await db.questions.find().sort("created_at", -1).to_list(1000)
+    
     return [Question(**question) for question in questions]
 
 @api_router.get("/questions/my", response_model=List[Question])
-async def get_my_questions(current_user: User = Depends(get_current_user)):
+async def get_my_questions(course_id: str = None, current_user: User = Depends(get_current_user)):
     if current_user.role != "student":
         raise HTTPException(status_code=403, detail="Only students can view their own questions")
     
-    questions = await db.questions.find({"user_id": current_user.id}).sort("created_at", -1).to_list(1000)
+    query = {"user_id": current_user.id}
+    if course_id:
+        query["course_id"] = course_id
+    
+    questions = await db.questions.find(query).sort("created_at", -1).to_list(1000)
     return [Question(**question) for question in questions]
 
 @api_router.put("/questions/{question_id}", response_model=Question)
@@ -532,6 +556,14 @@ async def create_poll(poll_data: PollCreate, current_user: User = Depends(get_cu
     if current_user.role != "professor":
         raise HTTPException(status_code=403, detail="Only professors can create polls")
     
+    # Verify professor owns the course
+    course = await db.courses.find_one({"id": poll_data.course_id})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    if course["professor_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only create polls in your own courses")
+    
     poll_dict = poll_data.dict()
     poll_dict["created_by"] = current_user.id
     
@@ -541,8 +573,16 @@ async def create_poll(poll_data: PollCreate, current_user: User = Depends(get_cu
     return poll_obj
 
 @api_router.get("/polls", response_model=List[Poll])
-async def get_polls(current_user: User = Depends(get_current_user)):
-    polls = await db.polls.find().sort("created_at", -1).to_list(1000)
+async def get_polls(course_id: str = None, current_user: User = Depends(get_current_user)):
+    if course_id:
+        # Get polls for specific course
+        polls = await db.polls.find({"course_id": course_id}).sort("created_at", -1).to_list(1000)
+    else:
+        # Get all polls (for moderators or when no course specified)
+        if current_user.role != "moderator":
+            raise HTTPException(status_code=400, detail="Course ID is required")
+        polls = await db.polls.find().sort("created_at", -1).to_list(1000)
+    
     return [Poll(**poll) for poll in polls]
 
 @api_router.post("/polls/{poll_id}/vote")
