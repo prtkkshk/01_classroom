@@ -1,5 +1,5 @@
-# Deployment fix - Force redeploy $(date)
-# This comment ensures the latest version is deployed
+# Deployment fix - Force redeploy with CORS and CSP headers $(date)
+# This comment ensures the latest version is deployed with security headers
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -22,14 +22,37 @@ from collections import defaultdict
 import asyncio
 from fastapi.responses import JSONResponse
 from bson import ObjectId
+import time
+import redis.asyncio as redis
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
+# Enhanced MongoDB connection with connection pooling
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-client = AsyncIOMotorClient(mongo_url)
+client = AsyncIOMotorClient(
+    mongo_url,
+    maxPoolSize=50,  # Maximum number of connections in the pool
+    minPoolSize=10,  # Minimum number of connections in the pool
+    maxIdleTimeMS=30000,  # Close connections after 30 seconds of inactivity
+    serverSelectionTimeoutMS=5000,  # Timeout for server selection
+    connectTimeoutMS=10000,  # Connection timeout
+    socketTimeoutMS=5000,  # Socket timeout
+    retryWrites=True,  # Enable retry writes
+    retryReads=True,  # Enable retry reads
+    w="majority"  # Write concern
+)
 db = client[os.environ.get('DB_NAME', 'classroom_live')]
+
+# Redis connection for caching and session management
+redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+redis_client = None
+
+async def get_redis():
+    global redis_client
+    if redis_client is None:
+        redis_client = redis.from_url(redis_url, decode_responses=True)
+    return redis_client
 
 # Security
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-here-change-in-production')
@@ -43,10 +66,40 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
 
 # Create the main app
-app = FastAPI(title="Classroom Live API", version="2.0.0")
+app = FastAPI(
+    title="Classroom Live API", 
+    version="2.0.0",
+    docs_url="/docs" if os.environ.get('ENVIRONMENT') != 'production' else None,
+    redoc_url="/redoc" if os.environ.get('ENVIRONMENT') != 'production' else None
+)
+
+# Enhanced CORS middleware with production-ready configuration
+allowed_origins = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:3001').split(',')
+if os.environ.get('ENVIRONMENT') == 'production':
+    # In production, be more restrictive
+    allowed_origins = [
+        "https://classroom-live.com",
+        "https://www.classroom-live.com",
+        "https://app.classroom-live.com",
+        "https://zero1-classroom-1.onrender.com",
+        "https://zero1-classroom-2.onrender.com"
+    ]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    max_age=3600,  # Cache preflight requests for 1 hour
+)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
+
+# Import enhanced components
+from middleware import setup_middleware, rate_limit_middleware, security_middleware_func, error_handling_middleware
+from session_manager import EnhancedSessionManager
 
 # Hardcoded credentials
 PROFESSOR_USERNAME = "professor60201"
@@ -247,8 +300,8 @@ class SessionManager:
     def get_active_users_count(self):
         return len(set(data['id'] for data in self.active_sessions.values()))
 
-# Create session manager instance
-session_manager = SessionManager()
+# Initialize enhanced session manager (will be set up in startup)
+session_manager = None
 
 # WebSocket Connection Manager
 class ConnectionManager:
@@ -1452,17 +1505,24 @@ async def health_check():
         logger.error(f"Database health check failed: {str(e)}")
         db_status = "unhealthy"
     
-    return {
+    from fastapi.responses import JSONResponse
+    response = JSONResponse({
         "status": "healthy" if db_status == "healthy" else "degraded",
         "database": db_status,
         "active_sessions": len(session_manager.active_sessions),
         "active_websockets": len(manager.active_connections),
         "timestamp": datetime.utcnow().isoformat()
-    }
+    })
+    
+    # Add CSP header
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';"
+    
+    return response
 
 @api_router.get("/info")
 async def get_api_info():
-    return {
+    from fastapi.responses import JSONResponse
+    response = JSONResponse({
         "name": "Classroom Live API",
         "version": "2.0.0",
         "features": [
@@ -1483,7 +1543,17 @@ async def get_api_info():
             "announcements": ["/api/announcements"],
             "admin": ["/api/admin/users", "/api/admin/stats", "/api/admin/create-professor"]
         }
-    }
+    })
+    
+    # Add CSP header
+    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';"
+    
+    return response
+
+# Add middleware to the app
+app.middleware("http")(error_handling_middleware)
+app.middleware("http")(security_middleware_func)
+app.middleware("http")(rate_limit_middleware)
 
 # Include the router in the main app
 app.include_router(api_router)
@@ -1570,38 +1640,76 @@ async def deactivate_expired_polls():
 # Startup and shutdown events
 @app.on_event("startup")
 async def startup_event():
-    logger.info("Starting Classroom Live API...")
+    global session_manager
+    
+    logger.info("Starting Classroom Live API with enhanced features...")
+    
+    # Initialize Redis connection
     try:
-        await db.users.create_index("email", unique=True)
-        await db.users.create_index("roll_number", unique=True, sparse=True)
-        await db.users.create_index("userid", unique=True, sparse=True)
-        
-        # Drop the problematic index if it exists and recreate it properly
-        try:
-            await db.users.drop_index("roll_number_1")
-        except Exception:
-            pass  # Index doesn't exist, which is fine
-        await db.users.create_index("roll_number", unique=True, sparse=True)
-        await db.courses.create_index("code", unique=True)
-        await db.courses.create_index("professor_id")
-        await db.courses.create_index("is_active")
-        await db.questions.create_index([("course_id", 1), ("created_at", -1)])
-        await db.questions.create_index("user_id")
-        await db.questions.create_index("is_answered")
-        await db.polls.create_index([("course_id", 1), ("created_at", -1)])
-        await db.polls.create_index("created_by")
-        await db.polls.create_index("is_active")
-        await db.polls.create_index("expires_at")
-        await db.votes.create_index([("poll_id", 1), ("user_id", 1)], unique=True)
-        await db.votes.create_index("poll_id")
-        await db.announcements.create_index([("course_id", 1), ("created_at", -1)])
-        await db.announcements.create_index("expires_at")
-        logger.info("Database indexes created successfully")
+        redis_client = await get_redis()
+        await redis_client.ping()
+        logger.info("Redis connection established")
     except Exception as e:
-        logger.warning(f"Index creation warning: {str(e)}")
+        logger.error(f"Redis connection failed: {e}")
+        # Fallback to in-memory session manager
+        session_manager = SessionManager()
+        logger.warning("Using in-memory session manager as fallback")
+    
+    # Initialize enhanced session manager
+    if redis_client:
+        session_manager = EnhancedSessionManager(redis_client)
+        await setup_middleware(redis_client)
+        logger.info("Enhanced session manager initialized")
+    
+    # Create indexes for better performance and scalability
+    try:
+        # Drop the problematic roll_number index if it exists
+        await db.users.drop_index("roll_number_1")
+    except Exception:
+        pass  # Index doesn't exist, which is fine
+    
+    # Enhanced indexes for scalability
+    await db.users.create_index("email", unique=True)
+    await db.users.create_index("roll_number", unique=True, sparse=True)
+    await db.users.create_index("userid", unique=True, sparse=True)
+    await db.users.create_index("role")
+    await db.users.create_index("created_at")
+    
+    await db.courses.create_index("code", unique=True)
+    await db.courses.create_index("professor_id")
+    await db.courses.create_index("students")
+    await db.courses.create_index("is_active")
+    await db.courses.create_index("created_at")
+    
+    await db.questions.create_index("course_id")
+    await db.questions.create_index("user_id")
+    await db.questions.create_index("created_at")
+    await db.questions.create_index([("priority", -1), ("created_at", -1)])
+    await db.questions.create_index("is_answered")
+    
+    await db.polls.create_index("course_id")
+    await db.polls.create_index("created_by")
+    await db.polls.create_index("expires_at")
+    await db.polls.create_index("is_active")
+    await db.polls.create_index("created_at")
+    
+    await db.votes.create_index("poll_id")
+    await db.votes.create_index("user_id")
+    await db.votes.create_index([("poll_id", 1), ("user_id", 1)], unique=True)
+    await db.votes.create_index("created_at")
+    
+    await db.announcements.create_index("course_id")
+    await db.announcements.create_index("created_by")
+    await db.announcements.create_index("created_at")
+    await db.announcements.create_index("expires_at")
+    
+    logger.info("Database indexes created successfully")
+    
+    # Start background tasks
     asyncio.create_task(cleanup_expired_sessions())
     asyncio.create_task(deactivate_expired_polls())
-    logger.info("Classroom Live API started successfully")
+    
+    logger.info("Classroom Live API started successfully with enhanced features")
 
 @app.on_event("shutdown")
 async def shutdown_event():
