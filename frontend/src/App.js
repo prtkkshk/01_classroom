@@ -943,7 +943,7 @@
 // export default App; 
 
 import React, { useState, useEffect, createContext, useContext, Component } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import axios from 'axios';
 import './App.css';
 
@@ -3141,12 +3141,8 @@ function App() {
                   </ProtectedRoute>
                 } 
               />
-              {/* Catch all route - redirect to home */}
-              <Route path="*" element={
-                <ProtectedRoute>
-                  <Navigate to="/" replace />
-                </ProtectedRoute>
-              } />
+              {/* Handle all other routes by redirecting to home */}
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Router>
         </CourseProvider>
