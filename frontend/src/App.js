@@ -2060,7 +2060,7 @@ const ModeratorDashboard = () => {
               <div>
                 <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6">Create Professor Account</h2>
                 <div className="bg-gray-50 rounded-lg p-6">
-                  <form onSubmit={handleCreateProfessor} className="space-y-4">
+                  <form onSubmit={handleCreateProfessor} className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
                       <input
@@ -2109,13 +2109,15 @@ const ModeratorDashboard = () => {
                       />
                     </div>
 
-                    <button
-                      type="submit"
-                      disabled={creatingProfessor}
-                      className="w-full bg-red-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-red-700 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors disabled:opacity-50"
-                    >
-                      {creatingProfessor ? 'Creating Professor...' : 'Create Professor Account'}
-                    </button>
+                    <div className="sm:col-span-2 mt-2">
+                      <button
+                        type="submit"
+                        disabled={creatingProfessor}
+                        className="w-full bg-red-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-red-700 focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors disabled:opacity-50"
+                      >
+                        {creatingProfessor ? 'Creating Professor...' : 'Create Professor Account'}
+                      </button>
+                    </div>
                   </form>
                 </div>
               </div>
