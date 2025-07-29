@@ -1462,7 +1462,7 @@ app.add_middleware(
         "https://zero1-classroom-1.onrender.com",
         "https://zero1-classroom-2.onrender.com",
     ],
-    allow_origin_regex=r"https://.*\\.onrender\\.com",  # Allow all onrender.com subdomains
+    allow_origin_regex=r"https://.*\.onrender\.com",  # Allow all onrender.com subdomains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

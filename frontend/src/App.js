@@ -1022,11 +1022,17 @@ const StudentDashboard = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  // Announcement state
+  const [announcements, setAnnouncements] = useState([]);
+  const [announcementLoading, setAnnouncementLoading] = useState(false);
+  const [announcementError, setAnnouncementError] = useState('');
+
   useEffect(() => {
     if (currentCourse) {
       fetchQuestions();
       fetchMyQuestions();
       fetchPolls();
+      fetchAnnouncements();
     }
   }, [currentCourse]);
 
@@ -1036,6 +1042,7 @@ const StudentDashboard = () => {
       fetchQuestions();
       fetchMyQuestions();
       fetchPolls();
+      fetchAnnouncements();
     }
   }, [lastUpdate]);
 
@@ -1064,6 +1071,19 @@ const StudentDashboard = () => {
     } catch (error) {
       console.error('Error fetching polls:', error);
     }
+  };
+
+  const fetchAnnouncements = async () => {
+    if (!currentCourse) return;
+    setAnnouncementLoading(true);
+    setAnnouncementError('');
+    try {
+      const response = await axios.get(`${API}/announcements?course_id=${currentCourse.id}`);
+      setAnnouncements(response.data);
+    } catch (error) {
+      setAnnouncementError('Error fetching announcements');
+    }
+    setAnnouncementLoading(false);
   };
 
   const handleSubmitQuestion = async (e) => {
@@ -1147,6 +1167,19 @@ const StudentDashboard = () => {
     setEditingQuestion(null);
     setQuestionText('');
     setIsAnonymous(false);
+  };
+
+  // Handler for creating an announcement
+  const handleCreateAnnouncement = async (data) => {
+    setAnnouncementLoading(true);
+    setAnnouncementError('');
+    try {
+      await axios.post(`${API}/announcements`, { ...data, course_id: currentCourse.id });
+      fetchAnnouncements();
+    } catch (error) {
+      setAnnouncementError('Error creating announcement');
+    }
+    setAnnouncementLoading(false);
   };
 
   return (
@@ -1380,6 +1413,25 @@ const StudentDashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Announcement UI for Course Dashboard */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {announcementError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 mb-6">
+            {announcementError}
+          </div>
+        )}
+
+        {announcementLoading ? (
+          <div className="text-gray-500">Loading announcements...</div>
+        ) : (
+          <AnnouncementList announcements={announcements} />
+        )}
+
+        {(user.role === 'professor' || user.role === 'moderator') && (
+          <AnnouncementForm onCreate={handleCreateAnnouncement} loading={announcementLoading} />
+        )}
+      </div>
     </div>
   );
 };
@@ -1399,10 +1451,16 @@ const ProfessorDashboard = () => {
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState(['', '']);
 
+  // Announcement state
+  const [announcements, setAnnouncements] = useState([]);
+  const [announcementLoading, setAnnouncementLoading] = useState(false);
+  const [announcementError, setAnnouncementError] = useState('');
+
   useEffect(() => {
     if (currentCourse) {
       fetchQuestions();
       fetchPolls();
+      fetchAnnouncements();
     }
   }, [currentCourse]);
 
@@ -1411,6 +1469,7 @@ const ProfessorDashboard = () => {
     if (currentCourse && lastUpdate) {
       fetchQuestions();
       fetchPolls();
+      fetchAnnouncements();
     }
   }, [lastUpdate]);
 
@@ -1430,6 +1489,19 @@ const ProfessorDashboard = () => {
     } catch (error) {
       console.error('Error fetching polls:', error);
     }
+  };
+
+  const fetchAnnouncements = async () => {
+    if (!currentCourse) return;
+    setAnnouncementLoading(true);
+    setAnnouncementError('');
+    try {
+      const response = await axios.get(`${API}/announcements?course_id=${currentCourse.id}`);
+      setAnnouncements(response.data);
+    } catch (error) {
+      setAnnouncementError('Error fetching announcements');
+    }
+    setAnnouncementLoading(false);
   };
 
   const handleMarkAsAnswered = async (questionId) => {
@@ -1491,6 +1563,19 @@ const ProfessorDashboard = () => {
         setError('Error deleting poll');
       }
     }
+  };
+
+  // Handler for creating an announcement
+  const handleCreateAnnouncement = async (data) => {
+    setAnnouncementLoading(true);
+    setAnnouncementError('');
+    try {
+      await axios.post(`${API}/announcements`, { ...data, course_id: currentCourse.id });
+      fetchAnnouncements();
+    } catch (error) {
+      setAnnouncementError('Error creating announcement');
+    }
+    setAnnouncementLoading(false);
   };
 
   return (
@@ -1694,6 +1779,25 @@ const ProfessorDashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Announcement UI for Course Dashboard */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {announcementError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 mb-6">
+            {announcementError}
+          </div>
+        )}
+
+        {announcementLoading ? (
+          <div className="text-gray-500">Loading announcements...</div>
+        ) : (
+          <AnnouncementList announcements={announcements} />
+        )}
+
+        {(user.role === 'professor' || user.role === 'moderator') && (
+          <AnnouncementForm onCreate={handleCreateAnnouncement} loading={announcementLoading} />
+        )}
+      </div>
     </div>
   );
 };
@@ -1719,6 +1823,11 @@ const ModeratorDashboard = () => {
   const [professorPassword, setProfessorPassword] = useState('');
   const [creatingProfessor, setCreatingProfessor] = useState(false);
 
+  // Announcement state
+  const [announcements, setAnnouncements] = useState([]);
+  const [announcementLoading, setAnnouncementLoading] = useState(false);
+  const [announcementError, setAnnouncementError] = useState('');
+
   useEffect(() => {
     fetchCourses();
     fetchStats();
@@ -1726,6 +1835,7 @@ const ModeratorDashboard = () => {
     fetchQuestions();
     fetchPolls();
     fetchVotes();
+    fetchAnnouncements();
   }, []);
 
   // Real-time updates when lastUpdate changes
@@ -1737,6 +1847,7 @@ const ModeratorDashboard = () => {
       fetchQuestions();
       fetchPolls();
       fetchVotes();
+      fetchAnnouncements();
     }
   }, [lastUpdate]);
 
@@ -1783,6 +1894,19 @@ const ModeratorDashboard = () => {
     } catch (error) {
       console.error('Error fetching votes:', error);
     }
+  };
+
+  const fetchAnnouncements = async () => {
+    if (!currentCourse) return;
+    setAnnouncementLoading(true);
+    setAnnouncementError('');
+    try {
+      const response = await axios.get(`${API}/announcements?course_id=${currentCourse.id}`);
+      setAnnouncements(response.data);
+    } catch (error) {
+      setAnnouncementError('Error fetching announcements');
+    }
+    setAnnouncementLoading(false);
   };
 
   const handleDeleteUser = async (userId) => {
@@ -1888,6 +2012,19 @@ const ModeratorDashboard = () => {
       setError(error.response?.data?.detail || 'Error creating professor account');
     }
     setCreatingProfessor(false);
+  };
+
+  // Handler for creating an announcement
+  const handleCreateAnnouncement = async (data) => {
+    setAnnouncementLoading(true);
+    setAnnouncementError('');
+    try {
+      await axios.post(`${API}/announcements`, { ...data, course_id: currentCourse.id });
+      fetchAnnouncements();
+    } catch (error) {
+      setAnnouncementError('Error creating announcement');
+    }
+    setAnnouncementLoading(false);
   };
 
   return (
@@ -2252,6 +2389,25 @@ const ModeratorDashboard = () => {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Announcement UI for Course Dashboard */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {announcementError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 mb-6">
+            {announcementError}
+          </div>
+        )}
+
+        {announcementLoading ? (
+          <div className="text-gray-500">Loading announcements...</div>
+        ) : (
+          <AnnouncementList announcements={announcements} />
+        )}
+
+        {(user.role === 'professor' || user.role === 'moderator') && (
+          <AnnouncementForm onCreate={handleCreateAnnouncement} loading={announcementLoading} />
+        )}
       </div>
     </div>
   );
