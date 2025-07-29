@@ -9,13 +9,7 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://zero1-classroo
 const cleanBackendUrl = BACKEND_URL.replace(/\/$/, ''); // Remove trailing slash
 const API = `${cleanBackendUrl}/api`;
 
-// Debug logging for URL construction
-console.log('URL Configuration:', {
-  BACKEND_URL,
-  cleanBackendUrl,
-  API,
-  envBackendUrl: process.env.REACT_APP_BACKEND_URL
-});
+
 
 // Add axios interceptors for better error handling
 axios.interceptors.response.use(
@@ -25,8 +19,6 @@ axios.interceptors.response.use(
   (error) => {
     console.error('Axios error:', {
       config: error.config,
-      url: error.config?.url,
-      method: error.config?.method,
       response: error.response,
       message: error.message
     });
@@ -37,17 +29,6 @@ axios.interceptors.response.use(
       return Promise.reject(new Error('Network error - cannot connect to server'));
     }
     
-    return Promise.reject(error);
-  }
-);
-
-// Add request interceptor to log URLs being called
-axios.interceptors.request.use(
-  (config) => {
-    console.log('Making request to:', config.url);
-    return config;
-  },
-  (error) => {
     return Promise.reject(error);
   }
 );
@@ -92,11 +73,7 @@ const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     try {
-      console.log('Attempting login to:', `${API}/login`);
-      
       const response = await axios.post(`${API}/login`, { username, password });
-      
-      console.log('Login response:', response);
       
       if (!response.data) {
         throw new Error('No data received from server');
@@ -114,13 +91,6 @@ const AuthProvider = ({ children }) => {
       setUser(userData);
       return { success: true };
     } catch (error) {
-      console.error('Login error details:', {
-        message: error.message,
-        response: error.response,
-        status: error.response?.status,
-        data: error.response?.data
-      });
-      
       // Handle network errors
       if (!error.response) {
         return { success: false, error: 'Network error - cannot connect to server. Please check your internet connection.' };
@@ -156,11 +126,7 @@ const AuthProvider = ({ children }) => {
 
   const register = async (username, email, password) => {
     try {
-      console.log('Attempting registration to:', `${API}/register`);
-      
       const response = await axios.post(`${API}/register`, { username, email, password });
-      
-      console.log('Register response:', response);
       
       if (!response.data) {
         throw new Error('No data received from server');
@@ -178,13 +144,6 @@ const AuthProvider = ({ children }) => {
       setUser(userData);
       return { success: true };
     } catch (error) {
-      console.error('Register error details:', {
-        message: error.message,
-        response: error.response,
-        status: error.response?.status,
-        data: error.response?.data
-      });
-      
       // Handle network errors
       if (!error.response) {
         return { success: false, error: 'Network error - cannot connect to server. Please check your internet connection.' };
@@ -283,57 +242,7 @@ class ErrorBoundary extends Component {
   }
 }
 
-// Backend Test Component
-const BackendTest = () => {
-  const [status, setStatus] = useState('Testing...');
-  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    const testBackend = async () => {
-      try {
-        console.log('Testing backend URL:', BACKEND_URL);
-        const response = await axios.get(BACKEND_URL);
-        console.log('Backend test response:', response);
-        setStatus('Backend is running!');
-        
-        // Also test the API endpoint
-        try {
-          console.log('Testing API URL:', API);
-          const apiResponse = await axios.get(`${API}/login`);
-          console.log('API test response:', apiResponse);
-        } catch (apiError) {
-          console.log('API endpoint test (expected to fail without auth):', apiError.response?.status);
-        }
-      } catch (error) {
-        console.error('Backend test error:', error);
-        setError(error.message);
-        setStatus('Backend test failed');
-      }
-    };
-
-    testBackend();
-  }, []);
-
-  return (
-    <div style={{ 
-      position: 'fixed', 
-      top: '10px', 
-      right: '10px', 
-      padding: '10px', 
-      border: '1px solid #ccc', 
-      backgroundColor: 'white',
-      borderRadius: '8px',
-      fontSize: '12px',
-      maxWidth: '300px',
-      zIndex: 1000
-    }}>
-      <h4 style={{ margin: '0 0 5px 0' }}>Backend Status: {status}</h4>
-      {error && <p style={{ color: 'red', margin: '5px 0' }}>Error: {error}</p>}
-      <p style={{ margin: '5px 0' }}>Backend URL: {BACKEND_URL}</p>
-      <p style={{ margin: '5px 0' }}>API URL: {API}</p>
-    </div>
-  );
-};
 
 // Login Component
 const Login = () => {
@@ -372,10 +281,7 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center p-4 relative">
-      {/* Backend Test Component - Fixed positioning */}
-      <BackendTest />
-      
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
         <div className="text-center mb-8">
           <div className="flex flex-row items-center justify-center gap-3 mb-2">
