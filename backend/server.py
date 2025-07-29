@@ -1146,12 +1146,12 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
     
     try:
         professor_dict = professor_data.dict()
-    professor_dict["password_hash"] = get_password_hash(professor_data.password)
-    professor_dict["role"] = "professor"
-    professor_dict["roll_number"] = None  # Professors don't have roll numbers
-    professor_dict.pop("password")
-    
-    professor_obj = User(**professor_dict)
+        professor_dict["password_hash"] = get_password_hash(professor_data.password)
+        professor_dict["role"] = "professor"
+        professor_dict["roll_number"] = None  # Professors don't have roll numbers
+        professor_dict.pop("password")
+        
+        professor_obj = User(**professor_dict)
         await db.users.insert_one(professor_obj.dict())
     except Exception as e:
         if "duplicate key error" in str(e).lower():
