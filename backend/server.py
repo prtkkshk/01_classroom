@@ -311,10 +311,21 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     except jwt.PyJWTError:
         raise credentials_exception
     
-    # Try to find user by roll_number first (students), then by userid (professors)
+    # Try to find user by roll_number first (students), then by userid (professors/moderators)
     user = await db.users.find_one({"roll_number": username})
     if not user:
         user = await db.users.find_one({"userid": username})
+    
+    # Temporary workaround for moderator without userid field
+    if not user and username == "pepper_moderator":
+        user = await db.users.find_one({"role": "moderator"})
+        if user and not user.get("userid"):
+            # Update the user to have userid
+            await db.users.update_one(
+                {"id": user["id"]}, 
+                {"$set": {"userid": username}}
+            )
+            user["userid"] = username
     
     if user is None:
         raise credentials_exception
@@ -323,9 +334,10 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     # This allows for graceful degradation if session manager is reset
     if not session_manager.is_token_valid(token):
         # Re-add to session manager if token is valid but not in session
+        username_field = user.get("roll_number") if user["role"] == "student" else user.get("userid")
         user_data_dict = {
             "id": user["id"],
-            "username": user.get("roll_number") or user.get("userid"),
+            "username": username_field,
             "email": user["email"],
             "role": user["role"],
             "name": user["name"],
@@ -405,13 +417,27 @@ async def login(user_credentials: UserLogin):
     # Check if it's moderator login
     if user_credentials.username == MODERATOR_USERNAME and user_credentials.password == MODERATOR_PASSWORD:
         # Create or get moderator user
-        moderator = await db.users.find_one({"username": MODERATOR_USERNAME})
+        moderator = await db.users.find_one({"userid": MODERATOR_USERNAME})
         if not moderator:
+            # Also check for old moderator without userid field
+            moderator = await db.users.find_one({"role": "moderator"})
+            if moderator and not moderator.get("userid"):
+                # Update existing moderator to have userid
+                await db.users.update_one(
+                    {"id": moderator["id"]}, 
+                    {"$set": {"userid": MODERATOR_USERNAME}}
+                )
+                moderator["userid"] = MODERATOR_USERNAME
+            
+        if not moderator:
+            # Create new moderator user
             moderator_user = User(
-                username=MODERATOR_USERNAME,
+                id=str(uuid.uuid4()),
                 email="moderator@classroom.com",
                 password_hash=get_password_hash(MODERATOR_PASSWORD),
-                role="moderator"
+                role="moderator",
+                name="Moderator",
+                userid=MODERATOR_USERNAME
             )
             await db.users.insert_one(moderator_user.dict())
             moderator = moderator_user.dict()
@@ -423,12 +449,12 @@ async def login(user_credentials: UserLogin):
         
         user_data_dict = {
             "id": moderator["id"],
-            "username": moderator["username"],
+            "username": moderator["userid"],  # Use userid as username for compatibility
             "email": moderator["email"],
             "role": moderator["role"],
             "name": moderator.get("name", "Moderator"),
             "roll_number": moderator.get("roll_number"),
-            "userid": moderator.get("userid")
+            "userid": moderator["userid"]
         }
         
         # Add to session manager
@@ -443,13 +469,27 @@ async def login(user_credentials: UserLogin):
     # Check if it's professor login
     if user_credentials.username == PROFESSOR_USERNAME and user_credentials.password == PROFESSOR_PASSWORD:
         # Create or get professor user
-        professor = await db.users.find_one({"username": PROFESSOR_USERNAME})
+        professor = await db.users.find_one({"userid": PROFESSOR_USERNAME})
         if not professor:
+            # Also check for old professor without userid field
+            professor = await db.users.find_one({"role": "professor"})
+            if professor and not professor.get("userid"):
+                # Update existing professor to have userid
+                await db.users.update_one(
+                    {"id": professor["id"]}, 
+                    {"$set": {"userid": PROFESSOR_USERNAME}}
+                )
+                professor["userid"] = PROFESSOR_USERNAME
+            
+        if not professor:
+            # Create new professor user
             professor_user = User(
-                username=PROFESSOR_USERNAME,
+                id=str(uuid.uuid4()),
                 email="professor@classroom.com",
                 password_hash=get_password_hash(PROFESSOR_PASSWORD),
-                role="professor"
+                role="professor",
+                name="Professor",
+                userid=PROFESSOR_USERNAME
             )
             await db.users.insert_one(professor_user.dict())
             professor = professor_user.dict()
@@ -461,12 +501,12 @@ async def login(user_credentials: UserLogin):
         
         user_data_dict = {
             "id": professor["id"],
-            "username": professor["username"],
+            "username": professor["userid"],  # Use userid as username for compatibility
             "email": professor["email"],
             "role": professor["role"],
             "name": professor.get("name", "Professor"),
             "roll_number": professor.get("roll_number"),
-            "userid": professor.get("userid")
+            "userid": professor["userid"]
         }
         
         # Add to session manager
