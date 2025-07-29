@@ -1823,6 +1823,12 @@ const ModeratorDashboard = () => {
   const [professorPassword, setProfessorPassword] = useState('');
   const [creatingProfessor, setCreatingProfessor] = useState(false);
 
+  // Announcement state for moderators
+  const [announcements, setAnnouncements] = useState([]);
+  const [announcementLoading, setAnnouncementLoading] = useState(false);
+  const [announcementError, setAnnouncementError] = useState('');
+  const [showAnnouncementForm, setShowAnnouncementForm] = useState(false);
+
   useEffect(() => {
     fetchCourses();
     fetchStats();
@@ -1830,6 +1836,7 @@ const ModeratorDashboard = () => {
     fetchQuestions();
     fetchPolls();
     fetchVotes();
+    fetchAnnouncements();
   }, []);
 
   // Real-time updates when lastUpdate changes
@@ -1841,6 +1848,7 @@ const ModeratorDashboard = () => {
       fetchQuestions();
       fetchPolls();
       fetchVotes();
+      fetchAnnouncements();
     }
   }, [lastUpdate]);
 
@@ -1856,37 +1864,89 @@ const ModeratorDashboard = () => {
   const fetchUsers = async () => {
     try {
       const response = await axios.get(`${API}/admin/users`);
-      setUsers(response.data);
+      setUsers(response.data.users || []);
     } catch (error) {
       console.error('Error fetching users:', error);
+      setUsers([]);
     }
   };
 
   const fetchQuestions = async () => {
     try {
       const response = await axios.get(`${API}/questions`);
-      setQuestions(response.data);
+      setQuestions(response.data || []);
     } catch (error) {
       console.error('Error fetching questions:', error);
+      setQuestions([]);
     }
   };
 
   const fetchPolls = async () => {
     try {
       const response = await axios.get(`${API}/polls`);
-      setPolls(response.data);
+      setPolls(response.data || []);
     } catch (error) {
       console.error('Error fetching polls:', error);
+      setPolls([]);
     }
   };
 
   const fetchVotes = async () => {
     try {
       const response = await axios.get(`${API}/admin/votes`);
-      setVotes(response.data);
+      setVotes(response.data || []);
     } catch (error) {
       console.error('Error fetching votes:', error);
+      setVotes([]);
     }
+  };
+
+  const fetchAnnouncements = async () => {
+    setAnnouncementLoading(true);
+    setAnnouncementError('');
+    try {
+      const response = await axios.get(`${API}/announcements`);
+      setAnnouncements(response.data || []);
+    } catch (error) {
+      console.error('Error fetching announcements:', error);
+      setAnnouncementError('Error fetching announcements');
+      setAnnouncements([]);
+    }
+    setAnnouncementLoading(false);
+  };
+
+  const handleCreateAnnouncement = async (data) => {
+    setAnnouncementLoading(true);
+    setAnnouncementError('');
+    try {
+      // If course_id is 'all', create announcement for all courses
+      if (data.course_id === 'all') {
+        const allCourses = await axios.get(`${API}/courses`);
+        for (const course of allCourses.data) {
+          await axios.post(`${API}/announcements`, {
+            ...data,
+            course_id: course.id
+          });
+        }
+      } else if (Array.isArray(data.course_id)) {
+        // If course_id is an array, create announcement for selected courses
+        for (const courseId of data.course_id) {
+          await axios.post(`${API}/announcements`, {
+            ...data,
+            course_id: courseId
+          });
+        }
+      } else {
+        // Single course announcement
+        await axios.post(`${API}/announcements`, data);
+      }
+      setSuccess('Announcement(s) created successfully!');
+      fetchAnnouncements();
+      setShowAnnouncementForm(false);
+    } catch (error) {
+      setAnnouncementError('Error creating announcement');
+    }
+    setAnnouncementLoading(false);
   };
 
 
@@ -2045,7 +2105,7 @@ const ModeratorDashboard = () => {
         <div className="bg-white rounded-lg shadow-sm mb-8">
           <div className="border-b">
             <nav className="flex flex-wrap space-x-4 sm:space-x-8 px-4 sm:px-6">
-              {['overview', 'courses', 'users', 'create-professor', 'questions', 'polls', 'votes'].map((tab) => (
+              {['overview', 'courses', 'users', 'create-professor', 'questions', 'polls', 'votes', 'announcements'].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
@@ -2127,7 +2187,7 @@ const ModeratorDashboard = () => {
               <div>
                 <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6">User Management</h2>
                 <div className="space-y-4">
-                  {users.map((user) => (
+                  {Array.isArray(users) && users.map((user) => (
                     <div key={user.id} className="bg-white border rounded-lg p-4">
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
                         <div className="flex-1 min-w-0">
@@ -2165,7 +2225,7 @@ const ModeratorDashboard = () => {
                     </div>
                   ))}
                 </div>
-                {users.length === 0 && (
+                {(!Array.isArray(users) || users.length === 0) && (
                   <p className="text-gray-600">No users found.</p>
                 )}
               </div>
@@ -2242,7 +2302,7 @@ const ModeratorDashboard = () => {
               <div>
                 <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6">Question Management</h2>
                 <div className="space-y-4">
-                  {questions.map((question) => (
+                  {Array.isArray(questions) && questions.map((question) => (
                     <div key={question.id} className="bg-white border rounded-lg p-4">
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
                         <div className="flex-1 min-w-0">
@@ -2279,7 +2339,7 @@ const ModeratorDashboard = () => {
                     </div>
                   ))}
                 </div>
-                {questions.length === 0 && (
+                {(!Array.isArray(questions) || questions.length === 0) && (
                   <p className="text-gray-600">No questions found.</p>
                 )}
               </div>
@@ -2289,7 +2349,7 @@ const ModeratorDashboard = () => {
               <div>
                 <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6">Poll Management</h2>
                 <div className="space-y-4">
-                  {polls.map((poll) => (
+                  {Array.isArray(polls) && polls.map((poll) => (
                     <div key={poll.id} className="bg-white border rounded-lg p-4">
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
                         <div className="flex-1 min-w-0">
@@ -2318,7 +2378,7 @@ const ModeratorDashboard = () => {
                     </div>
                   ))}
                 </div>
-                {polls.length === 0 && (
+                {(!Array.isArray(polls) || polls.length === 0) && (
                   <p className="text-gray-600">No polls found.</p>
                 )}
               </div>
@@ -2328,7 +2388,7 @@ const ModeratorDashboard = () => {
               <div>
                 <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6">Vote Management</h2>
                 <div className="space-y-4">
-                  {votes.map((vote) => (
+                  {Array.isArray(votes) && votes.map((vote) => (
                     <div key={vote.id} className="bg-white border rounded-lg p-4">
                       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
                         <div className="flex-1 min-w-0">
@@ -2351,8 +2411,70 @@ const ModeratorDashboard = () => {
                     </div>
                   ))}
                 </div>
-                {votes.length === 0 && (
+                {(!Array.isArray(votes) || votes.length === 0) && (
                   <p className="text-gray-600">No votes found.</p>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'announcements' && (
+              <div>
+                <div className="flex justify-between items-center mb-4 sm:mb-6">
+                  <h2 className="text-lg sm:text-xl font-semibold">Announcement Management</h2>
+                  <button
+                    onClick={() => setShowAnnouncementForm(!showAnnouncementForm)}
+                    className="bg-yellow-500 text-white px-4 py-2 rounded-lg hover:bg-yellow-600 transition-colors"
+                  >
+                    {showAnnouncementForm ? 'Cancel' : 'Create Announcement'}
+                  </button>
+                </div>
+
+                {announcementError && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 mb-6">
+                    {announcementError}
+                  </div>
+                )}
+
+                {showAnnouncementForm && (
+                  <ModeratorAnnouncementForm 
+                    onCreate={handleCreateAnnouncement} 
+                    loading={announcementLoading}
+                    courses={courses}
+                  />
+                )}
+
+                {announcementLoading ? (
+                  <div className="text-gray-500">Loading announcements...</div>
+                ) : (
+                  <div className="space-y-4">
+                    {Array.isArray(announcements) && announcements.map((announcement) => (
+                      <div key={announcement.id} className="bg-white border rounded-lg p-4">
+                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-medium text-gray-900 text-sm sm:text-base">{announcement.title}</h4>
+                            <p className="text-gray-700 whitespace-pre-line text-sm mt-2">{announcement.content}</p>
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              <span className="text-xs text-gray-500">
+                                Course: {announcement.course_id?.substring(0, 8)}...
+                              </span>
+                              {announcement.priority && announcement.priority !== 'normal' && (
+                                <span className="px-2 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs font-medium">
+                                  {announcement.priority}
+                                </span>
+                              )}
+                              <span className="text-xs text-gray-500">
+                                {new Date(announcement.created_at).toLocaleString()}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {(!Array.isArray(announcements) || announcements.length === 0) && !announcementLoading && (
+                  <p className="text-gray-600">No announcements found.</p>
                 )}
               </div>
             )}
@@ -2414,6 +2536,167 @@ const Dashboard = () => {
   }
   
   return <Navigate to="/login" replace />;
+};
+
+// ModeratorAnnouncementForm component
+const ModeratorAnnouncementForm = ({ onCreate, loading, courses }) => {
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [priority, setPriority] = useState('normal');
+  const [expiresHours, setExpiresHours] = useState('');
+  const [courseSelection, setCourseSelection] = useState('all'); // 'all', 'single', 'multiple'
+  const [selectedCourse, setSelectedCourse] = useState('');
+  const [selectedCourses, setSelectedCourses] = useState([]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    
+    let courseId;
+    if (courseSelection === 'all') {
+      courseId = 'all';
+    } else if (courseSelection === 'single') {
+      courseId = selectedCourse;
+    } else if (courseSelection === 'multiple') {
+      courseId = selectedCourses;
+    }
+
+    onCreate({ 
+      title, 
+      content, 
+      priority, 
+      expires_hours: expiresHours ? parseInt(expiresHours) : undefined,
+      course_id: courseId
+    });
+    
+    // Reset form
+    setTitle('');
+    setContent('');
+    setPriority('normal');
+    setExpiresHours('');
+    setCourseSelection('all');
+    setSelectedCourse('');
+    setSelectedCourses([]);
+  };
+
+  const handleCourseToggle = (courseId) => {
+    setSelectedCourses(prev => 
+      prev.includes(courseId) 
+        ? prev.filter(id => id !== courseId)
+        : [...prev, courseId]
+    );
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="mb-6 space-y-4 bg-gray-50 rounded-lg p-6">
+      <h3 className="text-lg font-semibold mb-4">Create Announcement</h3>
+      
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
+        <input
+          className="w-full border px-3 py-2 rounded"
+          placeholder="Announcement title"
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          required
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">Content</label>
+        <textarea
+          className="w-full border px-3 py-2 rounded"
+          placeholder="Announcement content"
+          value={content}
+          onChange={e => setContent(e.target.value)}
+          rows={4}
+          required
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Priority</label>
+          <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full border rounded px-3 py-2">
+            <option value="low">Low</option>
+            <option value="normal">Normal</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Expires in (hours)</label>
+          <input
+            type="number"
+            min="1"
+            className="w-full border rounded px-3 py-2"
+            value={expiresHours}
+            onChange={e => setExpiresHours(e.target.value)}
+            placeholder="Optional"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Course Selection</label>
+          <select 
+            value={courseSelection} 
+            onChange={e => setCourseSelection(e.target.value)} 
+            className="w-full border rounded px-3 py-2"
+          >
+            <option value="all">All Courses</option>
+            <option value="single">Single Course</option>
+            <option value="multiple">Multiple Courses</option>
+          </select>
+        </div>
+      </div>
+
+      {courseSelection === 'single' && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Select Course</label>
+          <select 
+            value={selectedCourse} 
+            onChange={e => setSelectedCourse(e.target.value)} 
+            className="w-full border rounded px-3 py-2"
+            required
+          >
+            <option value="">Choose a course...</option>
+            {courses.map(course => (
+              <option key={course.id} value={course.id}>
+                {course.name} ({course.code})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {courseSelection === 'multiple' && (
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Select Courses</label>
+          <div className="max-h-40 overflow-y-auto border rounded p-2 space-y-2">
+            {courses.map(course => (
+              <label key={course.id} className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  checked={selectedCourses.includes(course.id)}
+                  onChange={() => handleCourseToggle(course.id)}
+                  className="rounded"
+                />
+                <span className="text-sm">{course.name} ({course.code})</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <button 
+        type="submit" 
+        disabled={loading} 
+        className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 disabled:opacity-50"
+      >
+        {loading ? 'Creating...' : 'Create Announcement'}
+      </button>
+    </form>
+  );
 };
 
 // AnnouncementList component
