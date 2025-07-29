@@ -1140,9 +1140,13 @@ const useAuth = () => {
 const CourseContext = createContext();
 
 const CourseProvider = ({ children }) => {
-  const [currentCourse, setCurrentCourse] = useState(null);
+  const [currentCourse, setCurrentCourse] = useState(() => {
+    const saved = localStorage.getItem('currentCourse');
+    return saved ? JSON.parse(saved) : null;
+  });
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState(Date.now());
 
   const fetchCourses = async () => {
     try {
@@ -1179,6 +1183,7 @@ const CourseProvider = ({ children }) => {
       await fetchCourses();
       if (currentCourse?.id === courseId) {
         setCurrentCourse(null);
+        localStorage.removeItem('currentCourse');
       }
       return { success: true };
     } catch (error) {
@@ -1186,16 +1191,43 @@ const CourseProvider = ({ children }) => {
     }
   };
 
+  // Wrapper function to persist currentCourse state
+  const setCurrentCoursePersistent = (course) => {
+    setCurrentCourse(course);
+    if (course) {
+      localStorage.setItem('currentCourse', JSON.stringify(course));
+    } else {
+      localStorage.removeItem('currentCourse');
+    }
+  };
+
+  // Real-time update function
+  const refreshData = () => {
+    setLastUpdate(Date.now());
+    fetchCourses();
+  };
+
+  // Set up periodic refresh every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refreshData();
+    }, 30000); // 30 seconds
+
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <CourseContext.Provider value={{
       currentCourse,
-      setCurrentCourse,
+      setCurrentCourse: setCurrentCoursePersistent,
       courses,
       fetchCourses,
       createCourse,
       joinCourse,
       deleteCourse,
-      loading
+      loading,
+      lastUpdate,
+      refreshData
     }}>
       {children}
     </CourseContext.Provider>
@@ -1255,6 +1287,7 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1275,7 +1308,9 @@ const Login = () => {
 
     const result = await login(username.trim(), password);
     if (result.success) {
-      navigate('/');
+      // Redirect to the page they were trying to access, or home if none
+      const from = location.state?.from?.pathname || '/';
+      navigate(from, { replace: true });
     } else {
       setError(result.error);
     }
@@ -1366,6 +1401,7 @@ const Register = () => {
   const [loading, setLoading] = useState(false);
   const { register } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1401,7 +1437,9 @@ const Register = () => {
 
     const result = await register(username.trim(), email.trim(), password);
     if (result.success) {
-      navigate('/');
+      // Redirect to the page they were trying to access, or home if none
+      const from = location.state?.from?.pathname || '/';
+      navigate(from, { replace: true });
     } else {
       setError(result.error);
     }
@@ -1498,7 +1536,7 @@ const Register = () => {
 // Course Selection Component
 const CourseSelection = () => {
   const { user, logout } = useAuth();
-  const { courses, fetchCourses, createCourse, joinCourse, deleteCourse, setCurrentCourse } = useCourse();
+  const { courses, fetchCourses, createCourse, joinCourse, deleteCourse, setCurrentCourse, lastUpdate } = useCourse();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showJoinForm, setShowJoinForm] = useState(false);
   const [courseName, setCourseName] = useState('');
@@ -1510,6 +1548,13 @@ const CourseSelection = () => {
   useEffect(() => {
     fetchCourses();
   }, []);
+
+  // Real-time updates when lastUpdate changes
+  useEffect(() => {
+    if (lastUpdate) {
+      fetchCourses();
+    }
+  }, [lastUpdate]);
 
   const handleCreateCourse = async (e) => {
     e.preventDefault();
@@ -1876,7 +1921,7 @@ const PollCard = ({ poll, onVote, showResults = false }) => {
 // Student Dashboard Component
 const StudentDashboard = () => {
   const { user, logout } = useAuth();
-  const { currentCourse, setCurrentCourse } = useCourse();
+  const { currentCourse, setCurrentCourse, lastUpdate } = useCourse();
   const [activeTab, setActiveTab] = useState('questions');
   const [questions, setQuestions] = useState([]);
   const [myQuestions, setMyQuestions] = useState([]);
@@ -1897,6 +1942,15 @@ const StudentDashboard = () => {
       fetchPolls();
     }
   }, [currentCourse]);
+
+  // Real-time updates when lastUpdate changes
+  useEffect(() => {
+    if (currentCourse && lastUpdate) {
+      fetchQuestions();
+      fetchMyQuestions();
+      fetchPolls();
+    }
+  }, [lastUpdate]);
 
   const fetchQuestions = async () => {
     try {
@@ -2246,7 +2300,7 @@ const StudentDashboard = () => {
 // Professor Dashboard Component
 const ProfessorDashboard = () => {
   const { user, logout } = useAuth();
-  const { currentCourse, setCurrentCourse } = useCourse();
+  const { currentCourse, setCurrentCourse, lastUpdate } = useCourse();
   const [activeTab, setActiveTab] = useState('questions');
   const [questions, setQuestions] = useState([]);
   const [polls, setPolls] = useState([]);
@@ -2264,6 +2318,14 @@ const ProfessorDashboard = () => {
       fetchPolls();
     }
   }, [currentCourse]);
+
+  // Real-time updates when lastUpdate changes
+  useEffect(() => {
+    if (currentCourse && lastUpdate) {
+      fetchQuestions();
+      fetchPolls();
+    }
+  }, [lastUpdate]);
 
   const fetchQuestions = async () => {
     try {
@@ -2552,7 +2614,7 @@ const ProfessorDashboard = () => {
 // Moderator Dashboard Component
 const ModeratorDashboard = () => {
   const { user, logout } = useAuth();
-  const { courses, fetchCourses, deleteCourse } = useCourse();
+  const { courses, fetchCourses, deleteCourse, lastUpdate } = useCourse();
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState({});
@@ -2571,6 +2633,18 @@ const ModeratorDashboard = () => {
     fetchPolls();
     fetchVotes();
   }, []);
+
+  // Real-time updates when lastUpdate changes
+  useEffect(() => {
+    if (lastUpdate) {
+      fetchCourses();
+      fetchStats();
+      fetchUsers();
+      fetchQuestions();
+      fetchPolls();
+      fetchVotes();
+    }
+  }, [lastUpdate]);
 
   const fetchStats = async () => {
     try {
@@ -2991,6 +3065,7 @@ const ModeratorDashboard = () => {
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
+  const location = useLocation();
   
   if (loading) {
     return (
@@ -3004,7 +3079,8 @@ const ProtectedRoute = ({ children }) => {
   }
   
   if (!user) {
-    return <Navigate to="/login" replace />;
+    // Save the attempted location for redirect after login
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
   
   return children;
@@ -3057,6 +3133,20 @@ function App() {
                   </ProtectedRoute>
                 } 
               />
+              <Route 
+                path="/dashboard" 
+                element={
+                  <ProtectedRoute>
+                    <Dashboard />
+                  </ProtectedRoute>
+                } 
+              />
+              {/* Catch all route - redirect to home */}
+              <Route path="*" element={
+                <ProtectedRoute>
+                  <Navigate to="/" replace />
+                </ProtectedRoute>
+              } />
             </Routes>
           </Router>
         </CourseProvider>
