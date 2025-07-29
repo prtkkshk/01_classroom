@@ -5,7 +5,17 @@ import './App.css';
 
 // Backend URL configuration
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://zero1-classroom-1.onrender.com';
-const API = `${BACKEND_URL}/api`.replace(/\/+/g, '/'); // Remove double slashes
+// Ensure proper URL formatting by removing trailing slash from BACKEND_URL and adding /api
+const cleanBackendUrl = BACKEND_URL.replace(/\/$/, ''); // Remove trailing slash
+const API = `${cleanBackendUrl}/api`;
+
+// Debug logging for URL construction
+console.log('URL Configuration:', {
+  BACKEND_URL,
+  cleanBackendUrl,
+  API,
+  envBackendUrl: process.env.REACT_APP_BACKEND_URL
+});
 
 // Add axios interceptors for better error handling
 axios.interceptors.response.use(
@@ -15,6 +25,8 @@ axios.interceptors.response.use(
   (error) => {
     console.error('Axios error:', {
       config: error.config,
+      url: error.config?.url,
+      method: error.config?.method,
       response: error.response,
       message: error.message
     });
@@ -25,6 +37,17 @@ axios.interceptors.response.use(
       return Promise.reject(new Error('Network error - cannot connect to server'));
     }
     
+    return Promise.reject(error);
+  }
+);
+
+// Add request interceptor to log URLs being called
+axios.interceptors.request.use(
+  (config) => {
+    console.log('Making request to:', config.url);
+    return config;
+  },
+  (error) => {
     return Promise.reject(error);
   }
 );
@@ -272,6 +295,15 @@ const BackendTest = () => {
         const response = await axios.get(BACKEND_URL);
         console.log('Backend test response:', response);
         setStatus('Backend is running!');
+        
+        // Also test the API endpoint
+        try {
+          console.log('Testing API URL:', API);
+          const apiResponse = await axios.get(`${API}/login`);
+          console.log('API test response:', apiResponse);
+        } catch (apiError) {
+          console.log('API endpoint test (expected to fail without auth):', apiError.response?.status);
+        }
       } catch (error) {
         console.error('Backend test error:', error);
         setError(error.message);
@@ -429,10 +461,39 @@ const Register = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Input validation
+    if (!username.trim()) {
+      setError('Username is required');
+      return;
+    }
+    
+    if (!email.trim()) {
+      setError('Email is required');
+      return;
+    }
+    
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setError('Please enter a valid email address');
+      return;
+    }
+    
+    if (!password.trim()) {
+      setError('Password is required');
+      return;
+    }
+    
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters long');
+      return;
+    }
+    
     setLoading(true);
     setError('');
 
-    const result = await register(username, email, password);
+    const result = await register(username.trim(), email.trim(), password);
     if (result.success) {
       navigate('/');
     } else {
