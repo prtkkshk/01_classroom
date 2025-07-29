@@ -1,5 +1,3 @@
-# 
-
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
@@ -1442,8 +1440,8 @@ app.add_middleware(
         "http://localhost:3001",
         "https://zero1-classroom-1.onrender.com",
         "https://zero1-classroom-2.onrender.com",
-        "https://*.onrender.com"  # Allow all Render subdomains
     ],
+    allow_origin_regex=r"https://.*\\.onrender\\.com",  # Allow all onrender.com subdomains
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
