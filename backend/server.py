@@ -1139,27 +1139,47 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
     if current_user.role != "moderator":
         raise HTTPException(status_code=403, detail="Only moderators can create professor accounts")
     
+    # Debug: Log the incoming data
+    logger.info(f"Creating professor: {professor_data.email}, {professor_data.userid}")
+    
     existing_email = await db.users.find_one({"email": professor_data.email})
     if existing_email:
+        logger.warning(f"Email already exists: {professor_data.email}")
         raise HTTPException(status_code=400, detail="Email already registered")
     
     existing_userid = await db.users.find_one({"userid": professor_data.userid})
     if existing_userid:
+        logger.warning(f"UserID already exists: {professor_data.userid}")
         raise HTTPException(status_code=400, detail="User ID already registered")
     
     try:
         professor_dict = professor_data.dict()
         professor_dict["password_hash"] = get_password_hash(professor_data.password)
         professor_dict["role"] = "professor"
-        professor_dict["roll_number"] = None  # Professors don't have roll numbers
+        # Don't set roll_number to None explicitly - let it be Optional
         professor_dict.pop("password")
         
         professor_obj = User(**professor_dict)
-        await db.users.insert_one(professor_obj.dict())
+        
+        # Debug: Log the data being inserted
+        logger.info(f"Inserting professor: {professor_obj.dict()}")
+        
+        result = await db.users.insert_one(professor_obj.dict())
+        logger.info(f"Professor created successfully: {result.inserted_id}")
+        
     except Exception as e:
-        if "duplicate key error" in str(e).lower():
+        logger.error(f"Error creating professor: {str(e)}")
+        logger.error(f"Error type: {type(e)}")
+        
+        # Only treat as duplicate key error if it's actually a MongoDB duplicate key error
+        if hasattr(e, 'code') and e.code == 11000:
             raise HTTPException(status_code=400, detail="User ID or email already exists")
-        raise HTTPException(status_code=500, detail="Error creating professor account")
+        elif "duplicate key error" in str(e).lower():
+            raise HTTPException(status_code=400, detail="User ID or email already exists")
+        else:
+            # Log the actual error for debugging
+            logger.error(f"Unexpected error creating professor: {e}")
+            raise HTTPException(status_code=500, detail=f"Error creating professor account: {str(e)}")
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
