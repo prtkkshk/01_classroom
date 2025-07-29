@@ -2466,6 +2466,86 @@ const Dashboard = () => {
   return <Navigate to="/login" replace />;
 };
 
+// AnnouncementList component
+const AnnouncementList = ({ announcements }) => (
+  <div className="mb-8">
+    <h3 className="text-lg font-semibold mb-2">Announcements</h3>
+    {announcements.length === 0 ? (
+      <div className="text-gray-500">No announcements yet.</div>
+    ) : (
+      <ul className="space-y-3">
+        {announcements.map((a) => (
+          <li key={a.id} className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded shadow-sm">
+            <div className="font-bold text-yellow-800">{a.title}</div>
+            <div className="text-gray-700 whitespace-pre-line">{a.content}</div>
+            <div className="text-xs text-gray-500 mt-1">{a.created_at ? new Date(a.created_at).toLocaleString() : ''}</div>
+            {a.priority && a.priority !== 'normal' && (
+              <span className="ml-2 px-2 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs font-medium">{a.priority}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    )}
+  </div>
+);
+
+// Announcement creation form
+const AnnouncementForm = ({ onCreate, loading }) => {
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [priority, setPriority] = useState('normal');
+  const [expiresHours, setExpiresHours] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onCreate({ title, content, priority, expires_hours: expiresHours ? parseInt(expiresHours) : undefined });
+    setTitle('');
+    setContent('');
+    setPriority('normal');
+    setExpiresHours('');
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="mb-6 space-y-3">
+      <h3 className="text-lg font-semibold mb-2">Create Announcement</h3>
+      <input
+        className="w-full border px-3 py-2 rounded"
+        placeholder="Title"
+        value={title}
+        onChange={e => setTitle(e.target.value)}
+        required
+      />
+      <textarea
+        className="w-full border px-3 py-2 rounded"
+        placeholder="Content"
+        value={content}
+        onChange={e => setContent(e.target.value)}
+        required
+      />
+      <div className="flex gap-2 items-center">
+        <label className="text-sm">Priority:</label>
+        <select value={priority} onChange={e => setPriority(e.target.value)} className="border rounded px-2 py-1">
+          <option value="low">Low</option>
+          <option value="normal">Normal</option>
+          <option value="high">High</option>
+          <option value="urgent">Urgent</option>
+        </select>
+        <label className="text-sm ml-4">Expires in (hours):</label>
+        <input
+          type="number"
+          min="1"
+          className="border rounded px-2 py-1 w-20"
+          value={expiresHours}
+          onChange={e => setExpiresHours(e.target.value)}
+        />
+      </div>
+      <button type="submit" disabled={loading} className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600">
+        {loading ? 'Posting...' : 'Post Announcement'}
+      </button>
+    </form>
+  );
+};
+
 // Main App Component
 function App() {
   return (
