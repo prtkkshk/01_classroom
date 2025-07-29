@@ -302,11 +302,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     
     token = credentials.credentials
     
-    # First check if token is in active sessions
-    if not session_manager.is_token_valid(token):
-        raise credentials_exception
-    
     try:
+        # Decode JWT token first
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
@@ -322,52 +319,86 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     if user is None:
         raise credentials_exception
     
+    # Optionally check session manager (but don't fail if not found)
+    # This allows for graceful degradation if session manager is reset
+    if not session_manager.is_token_valid(token):
+        # Re-add to session manager if token is valid but not in session
+        user_data_dict = {
+            "id": user["id"],
+            "username": user.get("roll_number") or user.get("userid"),
+            "email": user["email"],
+            "role": user["role"],
+            "name": user["name"],
+            "roll_number": user.get("roll_number"),
+            "userid": user.get("userid")
+        }
+        session_manager.add_session(token, user_data_dict)
+    
     return User(**user)
 
 # Auth Routes
 @api_router.post("/register", response_model=Token)
 async def register(user_data: UserCreate):
-    # Check if roll number already exists (acts as username)
-    existing_roll = await db.users.find_one({"roll_number": user_data.roll_number})
-    if existing_roll:
-        raise HTTPException(status_code=400, detail="Roll number already registered")
-    
-    existing_email = await db.users.find_one({"email": user_data.email})
-    if existing_email:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Create new user
-    user_dict = user_data.dict()
-    user_dict["password_hash"] = get_password_hash(user_data.password)
-    user_dict["role"] = "student"
-    user_dict.pop("password")
-    
-    user_obj = User(**user_dict)
-    await db.users.insert_one(user_obj.dict())
-    
-    # Create access token
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user_obj.roll_number}, expires_delta=access_token_expires
-    )
-    
-    user_data_dict = {
-        "id": user_obj.id,
-        "username": user_obj.roll_number,  # Use roll_number as username for compatibility
-        "email": user_obj.email,
-        "role": user_obj.role,
-        "name": user_obj.name,
-        "roll_number": user_obj.roll_number
-    }
-    
-    # Add to session manager
-    session_manager.add_session(access_token, user_data_dict)
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user_data_dict
-    }
+    try:
+        # Validate input data
+        if not user_data.name or not user_data.name.strip():
+            raise HTTPException(status_code=422, detail="Name is required")
+        
+        if not user_data.roll_number or not user_data.roll_number.strip():
+            raise HTTPException(status_code=422, detail="Roll number is required")
+        
+        if not user_data.email or not user_data.email.strip():
+            raise HTTPException(status_code=422, detail="Email is required")
+        
+        if not user_data.password or len(user_data.password) < 6:
+            raise HTTPException(status_code=422, detail="Password must be at least 6 characters")
+        
+        # Check if roll number already exists (acts as username)
+        existing_roll = await db.users.find_one({"roll_number": user_data.roll_number})
+        if existing_roll:
+            raise HTTPException(status_code=400, detail="Roll number already registered")
+        
+        existing_email = await db.users.find_one({"email": user_data.email})
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        # Create new user
+        user_dict = user_data.dict()
+        user_dict["password_hash"] = get_password_hash(user_data.password)
+        user_dict["role"] = "student"
+        user_dict.pop("password")
+        
+        user_obj = User(**user_dict)
+        await db.users.insert_one(user_obj.dict())
+        
+        # Create access token
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user_obj.roll_number}, expires_delta=access_token_expires
+        )
+        
+        user_data_dict = {
+            "id": user_obj.id,
+            "username": user_obj.roll_number,  # Use roll_number as username for compatibility
+            "email": user_obj.email,
+            "role": user_obj.role,
+            "name": user_obj.name,
+            "roll_number": user_obj.roll_number
+        }
+        
+        # Add to session manager
+        session_manager.add_session(access_token, user_data_dict)
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": user_data_dict
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Registration error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error during registration")
 
 @api_router.post("/login", response_model=Token)
 async def login(user_credentials: UserLogin):
@@ -1001,6 +1032,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:3001",
+        "https://zero1-classroom-1.onrender.com",
         "https://zero1-classroom-2.onrender.com"
     ],
     allow_methods=["*"],
