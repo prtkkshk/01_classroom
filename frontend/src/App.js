@@ -8,21 +8,30 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://zero1-classroo
 const cleanBackendUrl = BACKEND_URL.replace(/\/$/, '');
 const API = `${cleanBackendUrl}/api`;
 
-// Add axios interceptors for better error handling
+// Add axios interceptors for better error handling and auto-logout on 401
 axios.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (error.response && error.response.status === 401) {
+      // Remove token and user from localStorage and reload to force login
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      delete axios.defaults.headers.common['Authorization'];
+      // Optionally, redirect to login page if using react-router
+      if (window.location.hash !== '#/login') {
+        window.location.hash = '#/login';
+      }
+    }
+    // Existing error logging
     console.error('Axios error:', {
       config: error.config,
       response: error.response,
       message: error.message
     });
-    
     if (!error.response) {
       console.error('Network error - no response received');
       return Promise.reject(new Error('Network error - cannot connect to server'));
     }
-    
     return Promise.reject(error);
   }
 );
