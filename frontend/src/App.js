@@ -1563,21 +1563,21 @@ const CourseSelection = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-4 gap-3">
-            <div className="flex items-center justify-between sm:justify-start">
-              <div className="flex items-center">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-3 sm:py-4 gap-2 sm:gap-3">
+            <div className="flex items-center justify-between sm:justify-start w-full sm:w-auto">
+              <div className="flex items-center min-w-0 flex-1 sm:flex-none">
                 <img 
                   src={`${process.env.PUBLIC_URL}/Untitled_design__2_-removebg-preview.png`} 
                   alt="Classroom Logo" 
-                  style={{ width: 32, height: 32, marginRight: 8 }} 
-                  className="sm:w-9 sm:h-9"
+                  style={{ width: 28, height: 28, marginRight: 6 }} 
+                  className="sm:w-9 sm:h-9 sm:mr-2"
                   onError={(e) => {
                     e.target.style.display = 'none';
                   }}
                 />
-                <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Classroom</h1>
-                <span className={`ml-2 sm:ml-3 px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium ${
+                <h1 className="text-lg sm:text-2xl font-bold text-gray-900 truncate">Classroom</h1>
+                <span className={`ml-2 sm:ml-3 px-2 py-1 rounded-full text-xs font-medium flex-shrink-0 ${
                   user.role === 'student' ? 'bg-blue-100 text-blue-800' :
                   user.role === 'professor' ? 'bg-purple-100 text-purple-800' :
                   'bg-red-100 text-red-800'
@@ -1586,11 +1586,11 @@ const CourseSelection = () => {
                 </span>
               </div>
             </div>
-            <div className="flex items-center justify-between sm:justify-end gap-3">
-              <span className="text-sm sm:text-base text-gray-700">Hello, {user.username}!</span>
+            <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-3 w-full sm:w-auto">
+              <span className="text-xs sm:text-base text-gray-700 truncate">Hello, {user.username}!</span>
               <button
                 onClick={logout}
-                className="bg-red-600 text-white px-3 sm:px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm"
+                className="bg-red-600 text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm flex-shrink-0"
               >
                 Logout
               </button>
@@ -2011,31 +2011,34 @@ const StudentDashboard = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center">
-              <button
-                onClick={() => setCurrentCourse(null)}
-                className="mr-4 text-gray-600 hover:text-gray-800"
-              >
-                ← Back to Courses
-              </button>
-              <img 
-                src={`${process.env.PUBLIC_URL}/Untitled_design__2_-removebg-preview.png`} 
-                alt="Classroom Logo" 
-                style={{ width: 36, height: 36, marginRight: 8 }}
-                onError={(e) => { e.target.style.display = 'none'; }}
-              />
-              <h1 className="text-2xl font-bold text-gray-900">{currentCourse?.name}</h1>
-              <span className="ml-3 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-                Student
-              </span>
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-3 sm:py-4 gap-2 sm:gap-3">
+            <div className="flex items-center justify-between sm:justify-start w-full sm:w-auto">
+              <div className="flex items-center min-w-0 flex-1 sm:flex-none">
+                <button
+                  onClick={() => setCurrentCourse(null)}
+                  className="mr-2 sm:mr-4 text-gray-600 hover:text-gray-800 text-xs sm:text-sm flex-shrink-0"
+                >
+                  ← Back
+                </button>
+                <img 
+                  src={`${process.env.PUBLIC_URL}/Untitled_design__2_-removebg-preview.png`} 
+                  alt="Classroom Logo" 
+                  style={{ width: 28, height: 28, marginRight: 6 }}
+                  className="sm:w-9 sm:h-9 sm:mr-2"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+                <h1 className="text-lg sm:text-2xl font-bold text-gray-900 truncate">{currentCourse?.name}</h1>
+                <span className="ml-2 sm:ml-3 px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium flex-shrink-0">
+                  Student
+                </span>
+              </div>
             </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-gray-700">Hello, {user.username}!</span>
+            <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-3 w-full sm:w-auto">
+              <span className="text-xs sm:text-base text-gray-700 truncate">Hello, {user.username}!</span>
               <button
                 onClick={logout}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+                className="bg-red-600 text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm flex-shrink-0"
               >
                 Logout
               </button>
@@ -2344,31 +2347,34 @@ const ProfessorDashboard = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center">
-              <button
-                onClick={() => setCurrentCourse(null)}
-                className="mr-4 text-gray-600 hover:text-gray-800"
-              >
-                ← Back to Courses
-              </button>
-              <img 
-                src={`${process.env.PUBLIC_URL}/Untitled_design__2_-removebg-preview.png`} 
-                alt="Classroom Logo" 
-                style={{ width: 36, height: 36, marginRight: 8 }}
-                onError={(e) => { e.target.style.display = 'none'; }}
-              />
-              <h1 className="text-2xl font-bold text-gray-900">{currentCourse?.name}</h1>
-              <span className="ml-3 px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-medium">
-                Professor
-              </span>
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-3 sm:py-4 gap-2 sm:gap-3">
+            <div className="flex items-center justify-between sm:justify-start w-full sm:w-auto">
+              <div className="flex items-center min-w-0 flex-1 sm:flex-none">
+                <button
+                  onClick={() => setCurrentCourse(null)}
+                  className="mr-2 sm:mr-4 text-gray-600 hover:text-gray-800 text-xs sm:text-sm flex-shrink-0"
+                >
+                  ← Back
+                </button>
+                <img 
+                  src={`${process.env.PUBLIC_URL}/Untitled_design__2_-removebg-preview.png`} 
+                  alt="Classroom Logo" 
+                  style={{ width: 28, height: 28, marginRight: 6 }}
+                  className="sm:w-9 sm:h-9 sm:mr-2"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+                <h1 className="text-lg sm:text-2xl font-bold text-gray-900 truncate">{currentCourse?.name}</h1>
+                <span className="ml-2 sm:ml-3 px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-medium flex-shrink-0">
+                  Professor
+                </span>
+              </div>
             </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-gray-700">Hello, {user.username}!</span>
+            <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-3 w-full sm:w-auto">
+              <span className="text-xs sm:text-base text-gray-700 truncate">Hello, {user.username}!</span>
               <button
                 onClick={logout}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+                className="bg-red-600 text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm flex-shrink-0"
               >
                 Logout
               </button>
@@ -2392,10 +2398,10 @@ const ProfessorDashboard = () => {
 
         <div className="bg-white rounded-lg shadow-sm mb-8">
           <div className="border-b">
-            <nav className="flex space-x-8 px-6">
+            <nav className="flex flex-wrap space-x-4 sm:space-x-8 px-4 sm:px-6">
               <button
                 onClick={() => setActiveTab('questions')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm ${
                   activeTab === 'questions'
                     ? 'border-indigo-500 text-indigo-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2405,7 +2411,7 @@ const ProfessorDashboard = () => {
               </button>
               <button
                 onClick={() => setActiveTab('polls')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm ${
                   activeTab === 'polls'
                     ? 'border-indigo-500 text-indigo-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2416,10 +2422,10 @@ const ProfessorDashboard = () => {
             </nav>
           </div>
 
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             {activeTab === 'questions' && (
               <div>
-                <h2 className="text-xl font-semibold mb-6">Questions Forum</h2>
+                <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6">Questions Forum</h2>
                 <div className="space-y-4">
                   {questions.map((question) => (
                     <div key={question.id} className="bg-white border rounded-lg p-4">
@@ -2692,25 +2698,28 @@ const ModeratorDashboard = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <div className="flex items-center">
-              <img 
-                src={`${process.env.PUBLIC_URL}/Untitled_design__2_-removebg-preview.png`} 
-                alt="Classroom Logo" 
-                style={{ width: 36, height: 36, marginRight: 8 }}
-                onError={(e) => { e.target.style.display = 'none'; }}
-              />
-              <h1 className="text-2xl font-bold text-gray-900">Classroom</h1>
-              <span className="ml-3 px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
-                Moderator
-              </span>
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center py-3 sm:py-4 gap-2 sm:gap-3">
+            <div className="flex items-center justify-between sm:justify-start w-full sm:w-auto">
+              <div className="flex items-center min-w-0 flex-1 sm:flex-none">
+                <img 
+                  src={`${process.env.PUBLIC_URL}/Untitled_design__2_-removebg-preview.png`} 
+                  alt="Classroom Logo" 
+                  style={{ width: 28, height: 28, marginRight: 6 }}
+                  className="sm:w-9 sm:h-9 sm:mr-2"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+                <h1 className="text-lg sm:text-2xl font-bold text-gray-900 truncate">Classroom</h1>
+                <span className="ml-2 sm:ml-3 px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium flex-shrink-0">
+                  Moderator
+                </span>
+              </div>
             </div>
-            <div className="flex items-center space-x-4">
-              <span className="text-gray-700">Hello, {user.username}!</span>
+            <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-3 w-full sm:w-auto">
+              <span className="text-xs sm:text-base text-gray-700 truncate">Hello, {user.username}!</span>
               <button
                 onClick={logout}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
+                className="bg-red-600 text-white px-2 sm:px-4 py-1.5 sm:py-2 rounded-lg hover:bg-red-700 transition-colors text-xs sm:text-sm flex-shrink-0"
               >
                 Logout
               </button>
@@ -2734,12 +2743,12 @@ const ModeratorDashboard = () => {
 
         <div className="bg-white rounded-lg shadow-sm mb-8">
           <div className="border-b">
-            <nav className="flex space-x-8 px-6">
+            <nav className="flex flex-wrap space-x-4 sm:space-x-8 px-4 sm:px-6">
               {['overview', 'courses', 'users', 'questions', 'polls', 'votes'].map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm capitalize ${
+                  className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm capitalize ${
                     activeTab === tab
                       ? 'border-red-500 text-red-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -2751,10 +2760,10 @@ const ModeratorDashboard = () => {
             </nav>
           </div>
 
-          <div className="p-6">
+          <div className="p-4 sm:p-6">
             {activeTab === 'overview' && (
               <div>
-                <h2 className="text-xl font-semibold mb-6">System Overview</h2>
+                <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6">System Overview</h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                   <div className="bg-blue-50 p-6 rounded-lg">
                     <h3 className="text-lg font-medium text-blue-900">Total Users</h3>
