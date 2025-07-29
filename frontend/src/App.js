@@ -2824,14 +2824,14 @@ const ModeratorDashboard = () => {
 
             {activeTab === 'users' && (
               <div>
-                <h2 className="text-xl font-semibold mb-6">User Management</h2>
+                <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6">User Management</h2>
                 <div className="space-y-4">
                   {users.map((user) => (
                     <div key={user.id} className="bg-white border rounded-lg p-4">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h4 className="font-medium text-gray-900">{user.username}</h4>
-                          <p className="text-sm text-gray-600">{user.email}</p>
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-medium text-gray-900 text-sm sm:text-base">{user.username}</h4>
+                          <p className="text-xs sm:text-sm text-gray-600">{user.email}</p>
                           <span className={`inline-block px-2 py-1 rounded-full text-xs font-medium mt-2 ${
                             user.role === 'student' ? 'bg-blue-100 text-blue-800' :
                             user.role === 'professor' ? 'bg-purple-100 text-purple-800' :
@@ -2840,11 +2840,11 @@ const ModeratorDashboard = () => {
                             {user.role}
                           </span>
                         </div>
-                        <div className="flex space-x-2">
+                        <div className="flex flex-col sm:flex-row gap-2 sm:space-x-2">
                           <button
                             onClick={() => handleDeleteUser(user.id)}
                             disabled={user.role === 'moderator'}
-                            className={`px-3 py-1 text-sm rounded ${
+                            className={`px-3 py-2 text-xs sm:text-sm rounded ${
                               user.role === 'moderator'
                                 ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                 : 'bg-red-600 text-white hover:bg-red-700'
@@ -2865,27 +2865,27 @@ const ModeratorDashboard = () => {
 
             {activeTab === 'questions' && (
               <div>
-                <h2 className="text-xl font-semibold mb-6">Question Management</h2>
+                <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6">Question Management</h2>
                 <div className="space-y-4">
                   {questions.map((question) => (
                     <div key={question.id} className="bg-white border rounded-lg p-4">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <h4 className="font-medium text-gray-900">{question.question_text}</h4>
-                          <div className="flex items-center space-x-4 text-sm text-gray-500 mt-2">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-medium text-gray-900 text-sm sm:text-base break-words">{question.question_text}</h4>
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-xs sm:text-sm text-gray-500 mt-2">
                             <span>By: {question.username}</span>
                             <span>{new Date(question.created_at).toLocaleDateString()}</span>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium self-start ${
                               question.is_answered ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
                             }`}>
                               {question.is_answered ? 'Answered' : 'Unanswered'}
                             </span>
                           </div>
                         </div>
-                        <div className="flex space-x-2">
+                        <div className="flex flex-col sm:flex-row gap-2 sm:space-x-2">
                           <button
                             onClick={() => handleToggleQuestionStatus(question.id, question.is_answered)}
-                            className={`px-3 py-1 text-sm rounded ${
+                            className={`px-3 py-2 text-xs sm:text-sm rounded ${
                               question.is_answered
                                 ? 'bg-yellow-600 text-white hover:bg-yellow-700'
                                 : 'bg-green-600 text-white hover:bg-green-700'
@@ -2895,7 +2895,7 @@ const ModeratorDashboard = () => {
                           </button>
                           <button
                             onClick={() => handleDeleteQuestion(question.id)}
-                            className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700"
+                            className="bg-red-600 text-white px-3 py-2 rounded text-xs sm:text-sm hover:bg-red-700"
                           >
                             Delete
                           </button>
@@ -2912,29 +2912,29 @@ const ModeratorDashboard = () => {
 
             {activeTab === 'polls' && (
               <div>
-                <h2 className="text-xl font-semibold mb-6">Poll Management</h2>
+                <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6">Poll Management</h2>
                 <div className="space-y-4">
                   {polls.map((poll) => (
                     <div key={poll.id} className="bg-white border rounded-lg p-4">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <h4 className="font-medium text-gray-900">{poll.question}</h4>
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-medium text-gray-900 text-sm sm:text-base break-words">{poll.question}</h4>
                           <div className="mt-2">
-                            <p className="text-sm text-gray-600">Options:</p>
-                            <ul className="list-disc list-inside text-sm text-gray-700 mt-1">
+                            <p className="text-xs sm:text-sm text-gray-600">Options:</p>
+                            <ul className="list-disc list-inside text-xs sm:text-sm text-gray-700 mt-1">
                               {poll.options.map((option, index) => (
-                                <li key={index}>{option}</li>
+                                <li key={index} className="break-words">{option}</li>
                               ))}
                             </ul>
                           </div>
-                          <p className="text-sm text-gray-500 mt-2">
+                          <p className="text-xs sm:text-sm text-gray-500 mt-2">
                             Created: {new Date(poll.created_at).toLocaleDateString()}
                           </p>
                         </div>
-                        <div className="flex space-x-2">
+                        <div className="flex flex-col sm:flex-row gap-2 sm:space-x-2">
                           <button
                             onClick={() => handleDeletePoll(poll.id)}
-                            className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700"
+                            className="bg-red-600 text-white px-3 py-2 rounded text-xs sm:text-sm hover:bg-red-700"
                           >
                             Delete
                           </button>
@@ -2951,23 +2951,23 @@ const ModeratorDashboard = () => {
 
             {activeTab === 'votes' && (
               <div>
-                <h2 className="text-xl font-semibold mb-6">Vote Management</h2>
+                <h2 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-6">Vote Management</h2>
                 <div className="space-y-4">
                   {votes.map((vote) => (
                     <div key={vote.id} className="bg-white border rounded-lg p-4">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <h4 className="font-medium text-gray-900">Poll ID: {vote.poll_id?.substring(0, 8)}...</h4>
-                          <p className="text-sm text-gray-600">User ID: {vote.user_id?.substring(0, 8)}...</p>
-                          <p className="text-sm text-gray-700">Selected: {vote.option_selected}</p>
-                          <p className="text-sm text-gray-500">
+                      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-medium text-gray-900 text-sm sm:text-base">Poll ID: {vote.poll_id?.substring(0, 8)}...</h4>
+                          <p className="text-xs sm:text-sm text-gray-600">User ID: {vote.user_id?.substring(0, 8)}...</p>
+                          <p className="text-xs sm:text-sm text-gray-700">Selected: {vote.option_selected}</p>
+                          <p className="text-xs sm:text-sm text-gray-500">
                             Voted: {new Date(vote.created_at).toLocaleDateString()}
                           </p>
                         </div>
-                        <div className="flex space-x-2">
+                        <div className="flex flex-col sm:flex-row gap-2 sm:space-x-2">
                           <button
                             onClick={() => handleDeleteVote(vote.id)}
-                            className="bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700"
+                            className="bg-red-600 text-white px-3 py-2 rounded text-xs sm:text-sm hover:bg-red-700"
                           >
                             Delete
                           </button>
