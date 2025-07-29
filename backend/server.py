@@ -23,7 +23,12 @@ import asyncio
 from fastapi.responses import JSONResponse
 from bson import ObjectId
 import time
-import redis.asyncio as redis
+try:
+    import redis.asyncio as redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    redis = None
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -50,9 +55,19 @@ redis_client = None
 
 async def get_redis():
     global redis_client
-    if redis_client is None:
-        redis_client = redis.from_url(redis_url, decode_responses=True)
-    return redis_client
+    if not REDIS_AVAILABLE:
+        logger.warning("Redis package not available. Using in-memory fallback.")
+        return None
+    
+    try:
+        if redis_client is None:
+            redis_client = redis.from_url(redis_url, decode_responses=True)
+            # Test the connection
+            await redis_client.ping()
+        return redis_client
+    except Exception as e:
+        logger.warning(f"Redis connection failed: {e}. Using in-memory fallback.")
+        return None
 
 # Security
 SECRET_KEY = os.environ.get('SECRET_KEY', 'your-secret-key-here-change-in-production')
@@ -98,8 +113,13 @@ app.add_middleware(
 api_router = APIRouter(prefix="/api")
 
 # Import enhanced components
-from middleware import setup_middleware, rate_limit_middleware, security_middleware_func, error_handling_middleware
-from session_manager import EnhancedSessionManager
+try:
+    from middleware import setup_middleware, rate_limit_middleware, security_middleware_func, error_handling_middleware
+    from session_manager import EnhancedSessionManager
+    ENHANCED_FEATURES_AVAILABLE = True
+except ImportError:
+    ENHANCED_FEATURES_AVAILABLE = False
+    logger.warning("Enhanced features (middleware, session manager) not available. Using basic features.")
 
 # Hardcoded credentials
 PROFESSOR_USERNAME = "professor60201"
@@ -1550,10 +1570,14 @@ async def get_api_info():
     
     return response
 
-# Add middleware to the app
-app.middleware("http")(error_handling_middleware)
-app.middleware("http")(security_middleware_func)
-app.middleware("http")(rate_limit_middleware)
+# Add middleware to the app (if available)
+if ENHANCED_FEATURES_AVAILABLE:
+    app.middleware("http")(error_handling_middleware)
+    app.middleware("http")(security_middleware_func)
+    app.middleware("http")(rate_limit_middleware)
+    logger.info("Enhanced middleware added")
+else:
+    logger.info("Using basic middleware (enhanced features not available)")
 
 # Include the router in the main app
 app.include_router(api_router)
@@ -1656,10 +1680,18 @@ async def startup_event():
         logger.warning("Using in-memory session manager as fallback")
     
     # Initialize enhanced session manager
-    if redis_client:
-        session_manager = EnhancedSessionManager(redis_client)
-        await setup_middleware(redis_client)
-        logger.info("Enhanced session manager initialized")
+    if redis_client and ENHANCED_FEATURES_AVAILABLE:
+        try:
+            session_manager = EnhancedSessionManager(redis_client)
+            await setup_middleware(redis_client)
+            logger.info("Enhanced session manager initialized with Redis")
+        except Exception as e:
+            logger.error(f"Failed to initialize enhanced session manager: {e}")
+            session_manager = SessionManager()
+            logger.info("Falling back to in-memory session manager")
+    else:
+        session_manager = SessionManager()
+        logger.info("Using in-memory session manager (Redis or enhanced features not available)")
     
     # Create indexes for better performance and scalability
     try:
