@@ -1144,13 +1144,19 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
     if existing_userid:
         raise HTTPException(status_code=400, detail="User ID already registered")
     
-    professor_dict = professor_data.dict()
+    try:
+        professor_dict = professor_data.dict()
     professor_dict["password_hash"] = get_password_hash(professor_data.password)
     professor_dict["role"] = "professor"
+    professor_dict["roll_number"] = None  # Professors don't have roll numbers
     professor_dict.pop("password")
     
     professor_obj = User(**professor_dict)
-    await db.users.insert_one(professor_obj.dict())
+        await db.users.insert_one(professor_obj.dict())
+    except Exception as e:
+        if "duplicate key error" in str(e).lower():
+            raise HTTPException(status_code=400, detail="User ID or email already exists")
+        raise HTTPException(status_code=500, detail="Error creating professor account")
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -1540,6 +1546,13 @@ async def startup_event():
         await db.users.create_index("email", unique=True)
         await db.users.create_index("roll_number", unique=True, sparse=True)
         await db.users.create_index("userid", unique=True, sparse=True)
+        
+        # Drop the problematic index if it exists and recreate it properly
+        try:
+            await db.users.drop_index("roll_number_1")
+        except Exception:
+            pass  # Index doesn't exist, which is fine
+        await db.users.create_index("roll_number", unique=True, sparse=True)
         await db.courses.create_index("code", unique=True)
         await db.courses.create_index("professor_id")
         await db.courses.create_index("is_active")
