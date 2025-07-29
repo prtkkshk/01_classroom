@@ -517,10 +517,51 @@ const ProtectedRoute = ({ children }) => {
   return children;
 };
 
-// Placeholder Dashboard Components (these were missing)
+// Student Dashboard Component
 const StudentDashboard = () => {
   const { user, logout } = useAuth();
-  
+  const [courses, setCourses] = useState([]);
+  const [joinCode, setJoinCode] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    fetchCourses();
+  }, []);
+
+  const fetchCourses = async () => {
+    try {
+      const response = await axios.get(`${API}/courses`);
+      setCourses(response.data);
+    } catch (error) {
+      console.error('Error fetching courses:', error);
+    }
+  };
+
+  const handleJoinCourse = async (e) => {
+    e.preventDefault();
+    if (!joinCode.trim()) {
+      setError('Please enter a course code');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      await axios.post(`${API}/courses/join`, { code: joinCode.trim() });
+      setSuccess('Successfully joined the course!');
+      setJoinCode('');
+      fetchCourses(); // Refresh the courses list
+    } catch (error) {
+      setError(error.response?.data?.detail || 'Failed to join course');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white shadow">
@@ -543,10 +584,52 @@ const StudentDashboard = () => {
       </div>
       
       <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
+        <div className="px-4 py-6 sm:px-0 space-y-6">
+          {/* Join Course Section */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-medium text-gray-900 mb-4">Join a Course</h2>
+            <form onSubmit={handleJoinCourse} className="flex gap-4">
+              <input
+                type="text"
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                placeholder="Enter 8-letter course code"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                maxLength={8}
+              />
+              <button
+                type="submit"
+                disabled={loading}
+                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Joining...' : 'Join Course'}
+              </button>
+            </form>
+            {error && (
+              <p className="text-red-600 text-sm mt-2">{error}</p>
+            )}
+            {success && (
+              <p className="text-green-600 text-sm mt-2">{success}</p>
+            )}
+          </div>
+
+          {/* Enrolled Courses */}
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-medium text-gray-900 mb-4">Your Classes</h2>
-            <p className="text-gray-600">No classes enrolled yet.</p>
+            {courses.length === 0 ? (
+              <p className="text-gray-600">No classes enrolled yet. Join a course using the code above.</p>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {courses.map((course) => (
+                  <div key={course.id} className="border border-gray-200 rounded-lg p-4">
+                    <h3 className="font-medium text-gray-900">{course.name}</h3>
+                    <p className="text-sm text-gray-600">Code: {course.code}</p>
+                    <p className="text-sm text-gray-600">Professor: {course.professor_name}</p>
+                    <p className="text-sm text-gray-600">Students: {course.students.length}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -556,7 +639,62 @@ const StudentDashboard = () => {
 
 const ProfessorDashboard = () => {
   const { user, logout } = useAuth();
-  
+  const [courses, setCourses] = useState([]);
+  const [newCourseName, setNewCourseName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    fetchCourses();
+  }, []);
+
+  const fetchCourses = async () => {
+    try {
+      const response = await axios.get(`${API}/courses`);
+      setCourses(response.data);
+    } catch (error) {
+      console.error('Error fetching courses:', error);
+    }
+  };
+
+  const handleCreateCourse = async (e) => {
+    e.preventDefault();
+    if (!newCourseName.trim()) {
+      setError('Please enter a course name');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await axios.post(`${API}/courses`, { name: newCourseName.trim() });
+      setSuccess(`Course "${response.data.name}" created successfully! Code: ${response.data.code}`);
+      setNewCourseName('');
+      fetchCourses(); // Refresh the courses list
+    } catch (error) {
+      setError(error.response?.data?.detail || 'Failed to create course');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteCourse = async (courseId) => {
+    if (!window.confirm('Are you sure you want to delete this course? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      await axios.delete(`${API}/courses/${courseId}`);
+      setSuccess('Course deleted successfully!');
+      fetchCourses(); // Refresh the courses list
+    } catch (error) {
+      setError(error.response?.data?.detail || 'Failed to delete course');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white shadow">
@@ -579,10 +717,59 @@ const ProfessorDashboard = () => {
       </div>
       
       <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
+        <div className="px-4 py-6 sm:px-0 space-y-6">
+          {/* Create Course Section */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-medium text-gray-900 mb-4">Create a New Course</h2>
+            <form onSubmit={handleCreateCourse} className="flex gap-4">
+              <input
+                type="text"
+                value={newCourseName}
+                onChange={(e) => setNewCourseName(e.target.value)}
+                placeholder="Enter course name"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+              <button
+                type="submit"
+                disabled={loading}
+                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Creating...' : 'Create Course'}
+              </button>
+            </form>
+            {error && (
+              <p className="text-red-600 text-sm mt-2">{error}</p>
+            )}
+            {success && (
+              <p className="text-green-600 text-sm mt-2">{success}</p>
+            )}
+          </div>
+
+          {/* Created Courses */}
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-medium text-gray-900 mb-4">Your Courses</h2>
-            <p className="text-gray-600">No courses created yet.</p>
+            {courses.length === 0 ? (
+              <p className="text-gray-600">No courses created yet. Create your first course above.</p>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {courses.map((course) => (
+                  <div key={course.id} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="font-medium text-gray-900">{course.name}</h3>
+                      <button
+                        onClick={() => handleDeleteCourse(course.id)}
+                        className="text-red-600 hover:text-red-800 text-sm"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-2">Code: <span className="font-mono bg-gray-100 px-2 py-1 rounded">{course.code}</span></p>
+                    <p className="text-sm text-gray-600">Students: {course.students.length}</p>
+                    <p className="text-sm text-gray-600">Created: {new Date(course.created_at).toLocaleDateString()}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -592,7 +779,40 @@ const ProfessorDashboard = () => {
 
 const ModeratorDashboard = () => {
   const { user, logout } = useAuth();
-  
+  const [courses, setCourses] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const fetchData = async () => {
+    try {
+      const [coursesResponse, statsResponse] = await Promise.all([
+        axios.get(`${API}/courses`),
+        axios.get(`${API}/admin/stats`)
+      ]);
+      setCourses(coursesResponse.data);
+      setStats(statsResponse.data);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+    }
+  };
+
+  const handleDeleteCourse = async (courseId) => {
+    if (!window.confirm('Are you sure you want to delete this course? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      await axios.delete(`${API}/courses/${courseId}`);
+      fetchData(); // Refresh the data
+    } catch (error) {
+      console.error('Error deleting course:', error);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white shadow">
@@ -615,10 +835,60 @@ const ModeratorDashboard = () => {
       </div>
       
       <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        <div className="px-4 py-6 sm:px-0">
+        <div className="px-4 py-6 sm:px-0 space-y-6">
+          {/* System Overview */}
           <div className="bg-white rounded-lg shadow p-6">
             <h2 className="text-lg font-medium text-gray-900 mb-4">System Overview</h2>
-            <p className="text-gray-600">Moderation tools will be displayed here.</p>
+            {stats ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="bg-blue-50 p-4 rounded-lg">
+                  <h3 className="text-sm font-medium text-blue-600">Total Users</h3>
+                  <p className="text-2xl font-bold text-blue-900">{stats.total_users}</p>
+                </div>
+                <div className="bg-green-50 p-4 rounded-lg">
+                  <h3 className="text-sm font-medium text-green-600">Total Courses</h3>
+                  <p className="text-2xl font-bold text-green-900">{stats.total_courses || courses.length}</p>
+                </div>
+                <div className="bg-yellow-50 p-4 rounded-lg">
+                  <h3 className="text-sm font-medium text-yellow-600">Total Questions</h3>
+                  <p className="text-2xl font-bold text-yellow-900">{stats.total_questions}</p>
+                </div>
+                <div className="bg-purple-50 p-4 rounded-lg">
+                  <h3 className="text-sm font-medium text-purple-600">Total Polls</h3>
+                  <p className="text-2xl font-bold text-purple-900">{stats.total_polls}</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-gray-600">Loading statistics...</p>
+            )}
+          </div>
+
+          {/* All Courses */}
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-lg font-medium text-gray-900 mb-4">All Courses</h2>
+            {courses.length === 0 ? (
+              <p className="text-gray-600">No courses exist yet.</p>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {courses.map((course) => (
+                  <div key={course.id} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="font-medium text-gray-900">{course.name}</h3>
+                      <button
+                        onClick={() => handleDeleteCourse(course.id)}
+                        className="text-red-600 hover:text-red-800 text-sm"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-2">Code: <span className="font-mono bg-gray-100 px-2 py-1 rounded">{course.code}</span></p>
+                    <p className="text-sm text-gray-600">Professor: {course.professor_name}</p>
+                    <p className="text-sm text-gray-600">Students: {course.students.length}</p>
+                    <p className="text-sm text-gray-600">Created: {new Date(course.created_at).toLocaleDateString()}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -670,4 +940,4 @@ function App() {
   );
 }
 
-export default App;
+export default App; 

@@ -9,6 +9,8 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 import uuid
+import random
+import string
 from datetime import datetime, timedelta
 import jwt
 from passlib.context import CryptContext
@@ -113,6 +115,21 @@ class PollResults(BaseModel):
     votes: Dict[str, int]
     total_votes: int
 
+class Course(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    code: str  # 8-letter unique code
+    professor_id: str
+    professor_name: str
+    students: List[str] = []  # List of student IDs
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class CourseCreate(BaseModel):
+    name: str
+
+class CourseJoin(BaseModel):
+    code: str
+
 class Session(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     user_id: str
@@ -137,6 +154,15 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+async def generate_course_code():
+    """Generate a unique 8-letter course code"""
+    while True:
+        code = ''.join(random.choices(string.ascii_uppercase, k=8))
+        # Check if code already exists
+        existing_course = await db.courses.find_one({"code": code})
+        if not existing_course:
+            return code
 
 # Session Management
 class SessionManager:
@@ -598,6 +624,110 @@ async def delete_own_poll(poll_id: str, current_user: User = Depends(get_current
 
     return {"message": "Poll and all associated votes deleted successfully"}
 
+# Course endpoints
+@api_router.post("/courses", response_model=Course)
+async def create_course(course_data: CourseCreate, current_user: User = Depends(get_current_user)):
+    if current_user.role != "professor":
+        raise HTTPException(status_code=403, detail="Only professors can create courses")
+    
+    # Generate unique course code
+    code = await generate_course_code()
+    
+    # Create course
+    course = Course(
+        name=course_data.name,
+        code=code,
+        professor_id=current_user.id,
+        professor_name=current_user.username
+    )
+    
+    await db.courses.insert_one(course.dict())
+    return course
+
+@api_router.get("/courses", response_model=List[Course])
+async def get_courses(current_user: User = Depends(get_current_user)):
+    if current_user.role == "professor":
+        # Professors see their own courses
+        courses = await db.courses.find({"professor_id": current_user.id}).to_list(1000)
+    elif current_user.role == "student":
+        # Students see courses they're enrolled in
+        courses = await db.courses.find({"students": current_user.id}).to_list(1000)
+    elif current_user.role == "moderator":
+        # Moderators see all courses
+        courses = await db.courses.find().to_list(1000)
+    else:
+        raise HTTPException(status_code=403, detail="Invalid role")
+    
+    return [Course(**course) for course in courses]
+
+@api_router.post("/courses/join")
+async def join_course(course_data: CourseJoin, current_user: User = Depends(get_current_user)):
+    if current_user.role != "student":
+        raise HTTPException(status_code=403, detail="Only students can join courses")
+    
+    # Find course by code
+    course = await db.courses.find_one({"code": course_data.code.upper()})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Check if student is already enrolled
+    if current_user.id in course["students"]:
+        raise HTTPException(status_code=400, detail="Already enrolled in this course")
+    
+    # Add student to course
+    await db.courses.update_one(
+        {"id": course["id"]},
+        {"$push": {"students": current_user.id}}
+    )
+    
+    return {"message": f"Successfully joined course: {course['name']}"}
+
+@api_router.delete("/courses/{course_id}")
+async def delete_course(course_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role not in ["professor", "moderator"]:
+        raise HTTPException(status_code=403, detail="Only professors and moderators can delete courses")
+    
+    # Check if course exists
+    course = await db.courses.find_one({"id": course_id})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Professors can only delete their own courses, moderators can delete any
+    if current_user.role == "professor" and course["professor_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only delete your own courses")
+    
+    # Delete the course
+    await db.courses.delete_one({"id": course_id})
+    
+    return {"message": "Course deleted successfully"}
+
+@api_router.get("/courses/{course_id}/students")
+async def get_course_students(course_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role not in ["professor", "moderator"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Check if course exists
+    course = await db.courses.find_one({"id": course_id})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    # Professors can only see students in their own courses
+    if current_user.role == "professor" and course["professor_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Get student details
+    students = []
+    for student_id in course["students"]:
+        student = await db.users.find_one({"id": student_id})
+        if student:
+            students.append({
+                "id": student["id"],
+                "username": student["username"],
+                "email": student["email"]
+            })
+    
+    return {"students": students}
+
 # Moderator-specific endpoints for full CRUD access
 @api_router.get("/admin/users", response_model=List[User])
 async def get_all_users(current_user: User = Depends(get_current_user)):
@@ -692,6 +822,7 @@ async def get_admin_stats(current_user: User = Depends(get_current_user)):
     questions_count = await db.questions.count_documents({})
     polls_count = await db.polls.count_documents({})
     votes_count = await db.votes.count_documents({})
+    courses_count = await db.courses.count_documents({})
     
     # Get counts by role
     students_count = await db.users.count_documents({"role": "student"})
@@ -702,6 +833,12 @@ async def get_admin_stats(current_user: User = Depends(get_current_user)):
     answered_questions = await db.questions.count_documents({"is_answered": True})
     unanswered_questions = questions_count - answered_questions
     
+    # Get total students enrolled in courses
+    total_enrollments = 0
+    courses = await db.courses.find().to_list(1000)
+    for course in courses:
+        total_enrollments += len(course.get("students", []))
+    
     return {
         "total_users": users_count,
         "students": students_count,
@@ -711,7 +848,9 @@ async def get_admin_stats(current_user: User = Depends(get_current_user)):
         "answered_questions": answered_questions,
         "unanswered_questions": unanswered_questions,
         "total_polls": polls_count,
-        "total_votes": votes_count
+        "total_votes": votes_count,
+        "total_courses": courses_count,
+        "total_enrollments": total_enrollments
     }
 
 @api_router.get("/admin/active-sessions")
