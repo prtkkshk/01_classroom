@@ -1,3 +1,6 @@
+# Deployment fix - Force redeploy $(date)
+# This comment ensures the latest version is deployed
+
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, WebSocket, WebSocketDisconnect
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
