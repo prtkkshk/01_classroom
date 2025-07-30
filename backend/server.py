@@ -160,7 +160,7 @@ except ImportError:
 # Add trusted host middleware for security
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["*"]  # Configure appropriately for production
+    allowed_hosts=["localhost", "127.0.0.1", "0.0.0.0", "classroom-live.onrender.com", "classroom-live.vercel.app"]
 )
 
 # Add custom middleware if available
@@ -193,20 +193,32 @@ session_manager = EnhancedSessionManager() if ENHANCED_FEATURES_AVAILABLE else N
 def sanitize_input(text: str) -> str:
     """Sanitize input to prevent XSS and injection attacks"""
     if not text:
-        return ""
+        return text
     
-    # Only remove truly dangerous characters, allow normal punctuation
-    dangerous_chars = ['<', '>', '&']
-    for char in dangerous_chars:
-        text = text.replace(char, '')
+    # Remove only dangerous HTML tags and scripts, not all special characters
+    import re
     
-    # Remove newlines and tabs but keep spaces
-    text = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+    # Remove script tags and their content
+    text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.IGNORECASE | re.DOTALL)
     
-    # Remove multiple spaces but keep single spaces
-    text = ' '.join(text.split())
+    # Remove other dangerous HTML tags
+    dangerous_tags = ['iframe', 'object', 'embed', 'form', 'input', 'textarea', 'select']
+    for tag in dangerous_tags:
+        text = re.sub(r'<' + tag + r'[^>]*>.*?</' + tag + r'>', '', text, flags=re.IGNORECASE | re.DOTALL)
+        text = re.sub(r'<' + tag + r'[^>]*/?>', '', text, flags=re.IGNORECASE)
     
-    return text.strip()
+    # Escape HTML entities for safety
+    text = text.replace('&', '&amp;')
+    text = text.replace('<', '&lt;')
+    text = text.replace('>', '&gt;')
+    text = text.replace('"', '&quot;')
+    text = text.replace("'", '&#x27;')
+    
+    # Remove excessive whitespace but preserve line breaks
+    text = re.sub(r'\s+', ' ', text)
+    text = text.strip()
+    
+    return text
 
 def validate_email_format(email: str) -> bool:
     """Validate email format using email-validator"""
@@ -217,12 +229,14 @@ def validate_email_format(email: str) -> bool:
         return False
 
 def validate_password_strength(password: str) -> bool:
-    """Validate password strength"""
-    if len(password) < 8:
+    """Validate password strength with reasonable requirements"""
+    if not password or len(password) < 6:
         return False
     
-    # More lenient validation - just require 8+ characters
-    # Optionally check for at least one letter and one digit
+    # Check for at least one letter and one digit, or allow longer passwords
+    if len(password) >= 8:
+        return True  # Longer passwords are acceptable even without complexity
+    
     has_letter = any(c.isalpha() for c in password)
     has_digit = any(c.isdigit() for c in password)
     
@@ -283,12 +297,19 @@ class UserCreate(BaseModel):
 
     @validator('roll_number')
     def validate_roll_number(cls, v):
-        v = sanitize_input(v)
-        if len(v) < 1 or len(v) > 50:  # More lenient
-            raise ValueError('Roll number must be between 1 and 50 characters')
-        # More permissive pattern
-        if not re.match(r'^[a-zA-Z0-9\s\-_\.]+$', v):
-            raise ValueError('Invalid roll number format')
+        if not v or len(v.strip()) < 3:
+            raise ValueError("Roll number must be at least 3 characters long")
+        
+        # Allow alphanumeric characters, hyphens, and underscores
+        import re
+        if not re.match(r'^[a-zA-Z0-9\-\_]+$', v):
+            raise ValueError("Roll number can only contain letters, numbers, hyphens, and underscores")
+        
+        # Sanitize the roll number
+        v = sanitize_input(v.strip().upper())
+        if len(v) < 3:
+            raise ValueError("Roll number must be at least 3 characters long after sanitization")
+        
         return v
 
 class UserCreateProfessor(BaseModel):
@@ -307,25 +328,41 @@ class UserCreateProfessor(BaseModel):
     @validator('password')
     def validate_password(cls, v):
         if not validate_password_strength(v):
-            raise ValueError('Password must be at least 8 characters with at least one letter and one digit')
+            raise ValueError('Password must be at least 6 characters long')
         return v
 
     @validator('name')
     def validate_name(cls, v):
-        v = sanitize_input(v)
-        if len(v) < 2 or len(v) > 50:
-            raise ValueError('Name must be between 2 and 50 characters')
-        # Allow normal names with spaces, hyphens, apostrophes, and common characters
-        # More permissive regex to allow international names and common formats
-        if not re.match(r'^[a-zA-Z0-9\s\-\'\.]+$', v):
-            raise ValueError('Name contains invalid characters')
+        if not v or len(v.strip()) < 2:
+            raise ValueError("Name must be at least 2 characters long")
+        
+        # Allow letters, spaces, hyphens, apostrophes, and common name characters
+        import re
+        if not re.match(r'^[a-zA-Z\s\-\'\.]+$', v):
+            raise ValueError("Name can only contain letters, spaces, hyphens, apostrophes, and periods")
+        
+        # Sanitize the name
+        v = sanitize_input(v.strip())
+        if len(v) < 2:
+            raise ValueError("Name must be at least 2 characters long after sanitization")
+        
         return v
 
     @validator('userid')
     def validate_userid(cls, v):
-        v = sanitize_input(v)
-        if not validate_userid(v):
-            raise ValueError('Invalid user ID format')
+        if not v or len(v.strip()) < 3:
+            raise ValueError("User ID must be at least 3 characters long")
+        
+        # Allow alphanumeric characters, hyphens, and underscores
+        import re
+        if not re.match(r'^[a-zA-Z0-9\-\_]+$', v):
+            raise ValueError("User ID can only contain letters, numbers, hyphens, and underscores")
+        
+        # Sanitize the user ID
+        v = sanitize_input(v.strip().lower())
+        if len(v) < 3:
+            raise ValueError("User ID must be at least 3 characters long after sanitization")
+        
         return v
 
 class UserLogin(BaseModel):
@@ -612,45 +649,36 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    try:
-        # Try to find user by roll_number first (students), then by userid (professors/moderators)
-        user = await db.users.find_one({"roll_number": username})
-        if not user:
-            user = await db.users.find_one({"userid": username})
-        
-        if user is None:
-            logger.warning(f"User not found for username: {username}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        logger.info(f"User found: {user.get('name', 'Unknown')} with role: {user.get('role', 'Unknown')}")
-        
-        # Convert ObjectId to string for JSON serialization
-        if "_id" in user:
-            user["_id"] = str(user["_id"])
-        
-        # Update last active timestamp
-        try:
-            await db.users.update_one(
-                {"_id": ObjectId(user["_id"]) if isinstance(user["_id"], str) else user["_id"]},
-                {"$set": {"last_active": datetime.utcnow()}}
-            )
-        except Exception as e:
-            logger.warning(f"Failed to update last_active: {e}")
-            # Don't fail authentication if this fails
-        
-        return User(**user)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Database error in get_current_user: {e}")
+    # Try to find user by roll_number first (students), then by userid (professors/moderators)
+    user = await db.users.find_one({"roll_number": username})
+    if not user:
+        user = await db.users.find_one({"userid": username})
+    
+    if user is None:
+        logger.warning(f"User not found for username: {username}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Database connection error"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    logger.info(f"User found: {user.get('name', 'Unknown')} with role: {user.get('role', 'Unknown')}")
+    
+    # Convert ObjectId to string for JSON serialization
+    if "_id" in user:
+        user["_id"] = str(user["_id"])
+    
+    # Update last active timestamp (don't fail if this fails)
+    try:
+        await db.users.update_one(
+            {"_id": ObjectId(user["_id"]) if isinstance(user["_id"], str) else user["_id"]},
+            {"$set": {"last_active": datetime.utcnow()}}
+        )
+    except Exception as e:
+        logger.warning(f"Failed to update last_active: {e}")
+        # Don't fail authentication if this fails
+    
+    return User(**user)
 
 # Optional authentication for WebSocket
 async def get_user_from_token(token: str):
@@ -1838,15 +1866,35 @@ async def status():
 # Health check and info endpoints
 @api_router.get("/health")
 async def health_check():
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "components": {}
+    }
+    
+    # Test database connection
     try:
-        # Test database connection
         await db.users.find_one()
-        db_status = "healthy"
+        health_status["components"]["database"] = "healthy"
     except Exception as e:
         logger.error(f"Database health check failed: {str(e)}")
-        db_status = "unhealthy"
+        health_status["components"]["database"] = "unhealthy"
+        health_status["status"] = "degraded"
     
-    # Safely get active sessions count
+    # Test Redis connection
+    try:
+        redis_client = await get_redis()
+        if redis_client:
+            await redis_client.ping()
+            health_status["components"]["redis"] = "healthy"
+        else:
+            health_status["components"]["redis"] = "not_configured"
+    except Exception as e:
+        logger.error(f"Redis health check failed: {str(e)}")
+        health_status["components"]["redis"] = "unhealthy"
+        health_status["status"] = "degraded"
+    
+    # Get active sessions count
     try:
         if session_manager and hasattr(session_manager, 'get_active_users_count'):
             active_sessions = await session_manager.get_active_users_count()
@@ -1854,25 +1902,31 @@ async def health_check():
             active_sessions = len(session_manager.memory_active_sessions)
         else:
             active_sessions = 0
+        health_status["components"]["sessions"] = "healthy"
+        health_status["active_sessions"] = active_sessions
     except Exception as e:
         logger.error(f"Session count error: {str(e)}")
-        active_sessions = 0
+        health_status["components"]["sessions"] = "unhealthy"
+        health_status["active_sessions"] = 0
+        health_status["status"] = "degraded"
     
-    # Safely get websocket count
+    # Get websocket count
     try:
         active_websockets = len(manager.active_connections) if manager else 0
+        health_status["components"]["websockets"] = "healthy"
+        health_status["active_websockets"] = active_websockets
     except Exception as e:
         logger.error(f"WebSocket count error: {str(e)}")
-        active_websockets = 0
+        health_status["components"]["websockets"] = "unhealthy"
+        health_status["active_websockets"] = 0
+        health_status["status"] = "degraded"
+    
+    # Add API uptime
+    import time
+    health_status["uptime_seconds"] = time.time() - app.start_time if hasattr(app, 'start_time') else 0
     
     from fastapi.responses import JSONResponse
-    response = JSONResponse({
-        "status": "healthy" if db_status == "healthy" else "degraded",
-        "database": db_status,
-        "active_sessions": active_sessions,
-        "active_websockets": active_websockets,
-        "timestamp": datetime.utcnow().isoformat()
-    })
+    response = JSONResponse(health_status)
     
     # Add CSP header
     response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';"
@@ -1992,69 +2046,63 @@ async def deactivate_expired_polls():
 # Startup and shutdown events
 @app.on_event("startup")
 async def startup_event():
-    global session_manager
+    import time
+    app.start_time = time.time()
     
-    logger.info("Starting Classroom Live API with enhanced features...")
+    logger.info("Starting Classroom Live API...")
+    
+    # Initialize database connection
+    try:
+        await db.users.find_one()
+        logger.info("Database connection established")
+    except Exception as e:
+        logger.error(f"Database connection failed: {e}")
+        raise
     
     # Initialize Redis connection
-    redis_client = await get_redis()
-    if redis_client:
-        try:
+    try:
+        redis_client = await get_redis()
+        if redis_client:
             await redis_client.ping()
             logger.info("Redis connection established")
-        except Exception as e:
-            logger.error(f"Redis ping failed: {e}")
-            redis_client = None
-    else:
-        logger.warning("Redis not available, using in-memory session manager")
+        else:
+            logger.warning("Redis not configured, using memory fallback")
+    except Exception as e:
+        logger.warning(f"Redis connection failed, using memory fallback: {e}")
     
-    # Initialize enhanced session manager
+    # Initialize session manager
     global session_manager
-    if redis_client and ENHANCED_FEATURES_AVAILABLE:
+    if ENHANCED_FEATURES_AVAILABLE:
         try:
             session_manager = EnhancedSessionManager(redis_client)
-            await setup_middleware(redis_client)
-            logger.info("Enhanced session manager initialized with Redis")
+            logger.info("Enhanced session manager initialized")
         except Exception as e:
-            logger.error(f"Failed to initialize enhanced session manager: {e}")
-            session_manager = EnhancedSessionManager()  # Use memory fallback
-            logger.info("Falling back to in-memory session manager")
+            logger.warning(f"Enhanced session manager failed, using basic: {e}")
+            session_manager = SessionManager()
     else:
-        session_manager = EnhancedSessionManager()  # Use memory fallback
-        logger.info("Using in-memory session manager (Redis or enhanced features not available)")
+        session_manager = SessionManager()
+        logger.info("Basic session manager initialized")
     
-    # Create indexes for better performance and scalability
-    try:
-        # Drop the problematic roll_number index if it exists
-        await db.users.drop_index("roll_number_1")
-    except Exception:
-        pass  # Index doesn't exist, which is fine
+    # Initialize connection manager
+    global manager
+    manager = ConnectionManager()
+    logger.info("Connection manager initialized")
     
-    # Enhanced indexes for scalability - handle errors gracefully
+    # Create database indexes
     try:
         await db.users.create_index("email", unique=True)
     except Exception as e:
-        logger.warning(f"Failed to create email index: {e}")
+        logger.warning(f"Failed to create users email index: {e}")
     
     try:
-        await db.users.create_index("roll_number", unique=True, sparse=True)
+        await db.users.create_index("roll_number", unique=True)
     except Exception as e:
-        logger.warning(f"Failed to create roll_number index: {e}")
+        logger.warning(f"Failed to create users roll_number index: {e}")
     
     try:
-        await db.users.create_index("userid", unique=True, sparse=True)
+        await db.users.create_index("userid", unique=True)
     except Exception as e:
-        logger.warning(f"Failed to create userid index: {e}")
-    
-    try:
-        await db.users.create_index("role")
-    except Exception as e:
-        logger.warning(f"Failed to create role index: {e}")
-    
-    try:
-        await db.users.create_index("created_at")
-    except Exception as e:
-        logger.warning(f"Failed to create created_at index: {e}")
+        logger.warning(f"Failed to create users userid index: {e}")
     
     try:
         await db.courses.create_index("code", unique=True)
@@ -2065,21 +2113,6 @@ async def startup_event():
         await db.courses.create_index("professor_id")
     except Exception as e:
         logger.warning(f"Failed to create courses professor_id index: {e}")
-    
-    try:
-        await db.courses.create_index("students")
-    except Exception as e:
-        logger.warning(f"Failed to create courses students index: {e}")
-    
-    try:
-        await db.courses.create_index("is_active")
-    except Exception as e:
-        logger.warning(f"Failed to create courses is_active index: {e}")
-    
-    try:
-        await db.courses.create_index("created_at")
-    except Exception as e:
-        logger.warning(f"Failed to create courses created_at index: {e}")
     
     try:
         await db.questions.create_index("course_id")
@@ -2097,16 +2130,6 @@ async def startup_event():
         logger.warning(f"Failed to create questions created_at index: {e}")
     
     try:
-        await db.questions.create_index([("priority", -1), ("created_at", -1)])
-    except Exception as e:
-        logger.warning(f"Failed to create questions priority index: {e}")
-    
-    try:
-        await db.questions.create_index("is_answered")
-    except Exception as e:
-        logger.warning(f"Failed to create questions is_answered index: {e}")
-    
-    try:
         await db.polls.create_index("course_id")
     except Exception as e:
         logger.warning(f"Failed to create polls course_id index: {e}")
@@ -2117,19 +2140,14 @@ async def startup_event():
         logger.warning(f"Failed to create polls created_by index: {e}")
     
     try:
-        await db.polls.create_index("expires_at")
-    except Exception as e:
-        logger.warning(f"Failed to create polls expires_at index: {e}")
-    
-    try:
-        await db.polls.create_index("is_active")
-    except Exception as e:
-        logger.warning(f"Failed to create polls is_active index: {e}")
-    
-    try:
         await db.polls.create_index("created_at")
     except Exception as e:
         logger.warning(f"Failed to create polls created_at index: {e}")
+    
+    try:
+        await db.polls.create_index("expires_at")
+    except Exception as e:
+        logger.warning(f"Failed to create polls expires_at index: {e}")
     
     try:
         await db.votes.create_index("poll_id")
@@ -2213,7 +2231,59 @@ async def general_exception_handler(request, exc):
     if isinstance(exc, HTTPException):
         raise exc
     
-    logger.error(f"Unhandled exception: {str(exc)}")
+    # Handle Pydantic validation errors specifically
+    if hasattr(exc, 'status_code') and exc.status_code == 422:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": True,
+                "message": "Validation error",
+                "detail": str(exc),
+                "status_code": 422,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+    
+    # Handle JWT errors specifically
+    if isinstance(exc, jwt.ExpiredSignatureError):
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": True,
+                "message": "Token has expired",
+                "status_code": 401,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+    
+    if isinstance(exc, jwt.JWTError):
+        return JSONResponse(
+            status_code=401,
+            content={
+                "error": True,
+                "message": "Could not validate credentials",
+                "status_code": 401,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+    
+    # Handle database connection errors
+    if "database" in str(exc).lower() or "connection" in str(exc).lower():
+        logger.error(f"Database error: {str(exc)}")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": True,
+                "message": "Database service unavailable",
+                "status_code": 503,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+    
+    # Log the actual error for debugging
+    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+    
+    # Only return 500 for truly unexpected errors
     return JSONResponse(
         status_code=500,
         content={

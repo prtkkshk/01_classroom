@@ -6,7 +6,7 @@ import time
 import json
 import logging
 from typing import Dict, List
-from fastapi import Request, Response
+from fastapi import Request, Response, HTTPException
 from fastapi.responses import JSONResponse
 import redis.asyncio as redis
 from datetime import datetime, timedelta
@@ -117,27 +117,32 @@ async def setup_middleware(redis_client: redis.Redis):
 async def rate_limit_middleware(request: Request, call_next):
     """Rate limiting middleware"""
     if rate_limiter and request.url.path.startswith("/api"):
-        # Determine rate limit type based on endpoint
-        limit_type = "default"
-        if request.url.path in ["/api/login", "/api/register"]:
-            limit_type = "login"
-        elif request.url.path == "/api/register":
-            limit_type = "register"
-        elif request.url.path.startswith("/api/admin"):
-            limit_type = "admin"
-        
-        client_key = rate_limiter.get_client_key(request, limit_type)
-        
-        if await rate_limiter.is_rate_limited(client_key, limit_type):
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "error": True,
-                    "message": "Rate limit exceeded. Please try again later.",
-                    "status_code": 429,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            )
+        try:
+            # Determine rate limit type based on endpoint
+            limit_type = "default"
+            if request.url.path in ["/api/login", "/api/register"]:
+                limit_type = "login"
+            elif request.url.path == "/api/register":
+                limit_type = "register"
+            elif request.url.path.startswith("/api/admin"):
+                limit_type = "admin"
+            
+            client_key = rate_limiter.get_client_key(request, limit_type)
+            
+            if await rate_limiter.is_rate_limited(client_key, limit_type):
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "error": True,
+                        "message": "Rate limit exceeded. Please try again later.",
+                        "status_code": 429,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+                )
+        except Exception as e:
+            # Log rate limiting errors but don't block requests
+            logger.warning(f"Rate limiting error: {e}")
+            # Continue with the request if rate limiting fails
     
     response = await call_next(request)
     return response
@@ -160,8 +165,12 @@ async def error_handling_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
         return response
+    except HTTPException:
+        # Re-raise HTTPExceptions to be handled by FastAPI
+        raise
     except Exception as e:
-        logger.error(f"Unhandled exception: {e}")
+        # Only log and return 500 for truly unexpected errors
+        logger.error(f"Unexpected error in middleware: {e}", exc_info=True)
         return JSONResponse(
             status_code=500,
             content={
@@ -181,6 +190,9 @@ async def logging_middleware(request: Request, call_next):
         duration = time.time() - start_time
         request_logger.log_request(request, response, duration)
         return response
+    except HTTPException:
+        # Re-raise HTTPExceptions to be handled by FastAPI
+        raise
     except Exception as e:
         duration = time.time() - start_time
         error_response = JSONResponse(
