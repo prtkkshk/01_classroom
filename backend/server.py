@@ -123,8 +123,9 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,  
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
-    expose_headers=["*"]
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "User-Agent", "DNT", "Cache-Control", "X-Mx-ReqToken", "Keep-Alive", "X-Requested-With", "If-Modified-Since"],
+    expose_headers=["*"],
+    max_age=3600
 )
 
 # Security middleware for adding security headers
@@ -195,27 +196,18 @@ def sanitize_input(text: str) -> str:
     if not text:
         return text
     
-    # Remove only dangerous HTML tags and scripts, not all special characters
     import re
     
-    # Remove script tags and their content
+    # Only remove the most dangerous script tags and content
     text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r'javascript:', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'on\w+\s*=', '', text, flags=re.IGNORECASE)
     
-    # Remove other dangerous HTML tags
-    dangerous_tags = ['iframe', 'object', 'embed', 'form', 'input', 'textarea', 'select']
-    for tag in dangerous_tags:
-        text = re.sub(r'<' + tag + r'[^>]*>.*?</' + tag + r'>', '', text, flags=re.IGNORECASE | re.DOTALL)
-        text = re.sub(r'<' + tag + r'[^>]*/?>', '', text, flags=re.IGNORECASE)
+    # Don't escape HTML entities for normal text - this was too aggressive
+    # Only remove truly dangerous patterns
+    text = re.sub(r'<\s*script', '', text, flags=re.IGNORECASE)
     
-    # Escape HTML entities for safety
-    text = text.replace('&', '&amp;')
-    text = text.replace('<', '&lt;')
-    text = text.replace('>', '&gt;')
-    text = text.replace('"', '&quot;')
-    text = text.replace("'", '&#x27;')
-    
-    # Remove excessive whitespace but preserve line breaks
-    text = re.sub(r'\s+', ' ', text)
+    # Trim whitespace
     text = text.strip()
     
     return text
@@ -296,21 +288,22 @@ class UserCreate(BaseModel):
         return v
 
     @validator('roll_number')
-    def validate_roll_number(cls, v):
-        if not v or len(v.strip()) < 3:
-            raise ValueError("Roll number must be at least 3 characters long")
-        
-        # Allow alphanumeric characters, hyphens, and underscores
-        import re
-        if not re.match(r'^[a-zA-Z0-9\-\_]+$', v):
-            raise ValueError("Roll number can only contain letters, numbers, hyphens, and underscores")
-        
-        # Sanitize the roll number
-        v = sanitize_input(v.strip().upper())
-        if len(v) < 3:
-            raise ValueError("Roll number must be at least 3 characters long after sanitization")
-        
-        return v
+def validate_roll_number(cls, v):
+    if not v or len(v.strip()) < 1:
+        raise ValueError("Roll number is required")
+    
+    # More permissive regex - allow more characters
+    import re
+    cleaned = v.strip()
+    if not re.match(r'^[a-zA-Z0-9\-\_\.@]+$', cleaned):
+        raise ValueError("Roll number contains invalid characters")
+    
+    if len(cleaned) > 50:
+        raise ValueError("Roll number too long")
+    
+    return cleaned.upper()
+
+    
 
 class UserCreateProfessor(BaseModel):
     name: str
@@ -616,7 +609,6 @@ app.include_router(api_router)
 # Authentication function
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if credentials is None:
-        logger.warning("No credentials provided in request")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -627,58 +619,67 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
-            logger.warning("JWT payload missing 'sub' field")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Could not validate credentials",
+                detail="Invalid token: missing subject",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        logger.info(f"JWT validated for username: {username}")
     except jwt.ExpiredSignatureError:
-        logger.warning("JWT token expired")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except jwt.JWTError as e:
-        logger.warning(f"JWT validation error: {str(e)}")
+    except jwt.InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
+            detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    # Try to find user by roll_number first (students), then by userid (professors/moderators)
-    user = await db.users.find_one({"roll_number": username})
-    if not user:
-        user = await db.users.find_one({"userid": username})
-    
-    if user is None:
-        logger.warning(f"User not found for username: {username}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    logger.info(f"User found: {user.get('name', 'Unknown')} with role: {user.get('role', 'Unknown')}")
-    
-    # Convert ObjectId to string for JSON serialization
-    if "_id" in user:
-        user["_id"] = str(user["_id"])
-    
-    # Update last active timestamp (don't fail if this fails)
-    try:
-        await db.users.update_one(
-            {"_id": ObjectId(user["_id"]) if isinstance(user["_id"], str) else user["_id"]},
-            {"$set": {"last_active": datetime.utcnow()}}
         )
     except Exception as e:
-        logger.warning(f"Failed to update last_active: {e}")
-        # Don't fail authentication if this fails
+        logger.error(f"Unexpected error in JWT validation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token validation failed",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
-    return User(**user)
+    try:
+        # Try to find user by roll_number first (students), then by userid (professors/moderators)
+        user = await db.users.find_one({"roll_number": username})
+        if not user:
+            user = await db.users.find_one({"userid": username})
+        
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Convert ObjectId to string for JSON serialization
+        if "_id" in user:
+            user["_id"] = str(user["_id"])
+        
+        # Update last active timestamp (don't fail authentication if this fails)
+        try:
+            await db.users.update_one(
+                {"_id": ObjectId(user["_id"]) if isinstance(user["_id"], str) else user["_id"]},
+                {"$set": {"last_active": datetime.utcnow()}}
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update last_active: {e}")
+        
+        return User(**user)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Database error in get_current_user: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error"
+        )
 
 # Optional authentication for WebSocket
 async def get_user_from_token(token: str):
@@ -2225,65 +2226,28 @@ async def http_exception_handler(request, exc):
         }
     )
 
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": True,
+            "message": exc.detail,
+            "status_code": exc.status_code,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    )
+
+# Remove the general exception handler or make it much more specific
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
-    # Don't catch HTTPExceptions - let them be handled by the specific handler
+    # NEVER catch HTTPExceptions here - they should bubble up
     if isinstance(exc, HTTPException):
         raise exc
     
-    # Handle Pydantic validation errors specifically
-    if hasattr(exc, 'status_code') and exc.status_code == 422:
-        return JSONResponse(
-            status_code=422,
-            content={
-                "error": True,
-                "message": "Validation error",
-                "detail": str(exc),
-                "status_code": 422,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        )
+    # Only log truly unexpected errors and return 500
+    logger.error(f"Unhandled exception in {request.method} {request.url}: {str(exc)}", exc_info=True)
     
-    # Handle JWT errors specifically
-    if isinstance(exc, jwt.ExpiredSignatureError):
-        return JSONResponse(
-            status_code=401,
-            content={
-                "error": True,
-                "message": "Token has expired",
-                "status_code": 401,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        )
-    
-    if isinstance(exc, jwt.JWTError):
-        return JSONResponse(
-            status_code=401,
-            content={
-                "error": True,
-                "message": "Could not validate credentials",
-                "status_code": 401,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        )
-    
-    # Handle database connection errors
-    if "database" in str(exc).lower() or "connection" in str(exc).lower():
-        logger.error(f"Database error: {str(exc)}")
-        return JSONResponse(
-            status_code=503,
-            content={
-                "error": True,
-                "message": "Database service unavailable",
-                "status_code": 503,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        )
-    
-    # Log the actual error for debugging
-    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
-    
-    # Only return 500 for truly unexpected errors
     return JSONResponse(
         status_code=500,
         content={
