@@ -946,14 +946,16 @@ async def delete_question(question_id: str, current_user: User = Depends(get_cur
 # Poll Routes
 @api_router.post("/polls", response_model=Poll)
 async def create_poll(poll_data: PollCreate, current_user: User = Depends(get_current_user)):
-    if current_user.role != "professor":
-        raise HTTPException(status_code=403, detail="Only professors can create polls")
+    if current_user.role not in ["professor", "moderator"]:
+        raise HTTPException(status_code=403, detail="Only professors and moderators can create polls")
     
     course = await db.courses.find_one({"id": poll_data.course_id})
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
     
-    if course["professor_id"] != current_user.id:
+    # Professors can only create polls in their own courses
+    # Moderators can create polls in any course
+    if current_user.role == "professor" and course["professor_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="You can only create polls in your own courses")
     
     poll_dict = poll_data.model_dump()
@@ -1097,14 +1099,16 @@ async def get_user_vote(poll_id: str, current_user: User = Depends(get_current_u
 
 @api_router.delete("/polls/{poll_id}")
 async def delete_poll(poll_id: str, current_user: User = Depends(get_current_user)):
-    if current_user.role != "professor":
-        raise HTTPException(status_code=403, detail="Only professors can delete polls")
+    if current_user.role not in ["professor", "moderator"]:
+        raise HTTPException(status_code=403, detail="Only professors and moderators can delete polls")
     
     poll = await db.polls.find_one({"id": poll_id})
     if not poll:
         raise HTTPException(status_code=404, detail="Poll not found")
     
-    if poll["created_by"] != current_user.id:
+    # Professors can only delete their own polls
+    # Moderators can delete any poll
+    if current_user.role == "professor" and poll["created_by"] != current_user.id:
         raise HTTPException(status_code=403, detail="You can only delete your own polls")
     
     # Soft delete - mark as inactive
@@ -1124,14 +1128,16 @@ async def delete_poll(poll_id: str, current_user: User = Depends(get_current_use
 # Announcement Routes
 @api_router.post("/announcements", response_model=Announcement)
 async def create_announcement(announcement_data: AnnouncementCreate, current_user: User = Depends(get_current_user)):
-    if current_user.role != "professor":
-        raise HTTPException(status_code=403, detail="Only professors can create announcements")
+    if current_user.role not in ["professor", "moderator"]:
+        raise HTTPException(status_code=403, detail="Only professors and moderators can create announcements")
     
     course = await db.courses.find_one({"id": announcement_data.course_id})
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
     
-    if course["professor_id"] != current_user.id:
+    # Professors can only create announcements in their own courses
+    # Moderators can create announcements in any course
+    if current_user.role == "professor" and course["professor_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="You can only create announcements in your own courses")
     
     announcement_dict = announcement_data.model_dump()
