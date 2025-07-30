@@ -288,20 +288,20 @@ class UserCreate(BaseModel):
         return v
 
     @validator('roll_number')
-def validate_roll_number(cls, v):
-    if not v or len(v.strip()) < 1:
-        raise ValueError("Roll number is required")
-    
-    # More permissive regex - allow more characters
-    import re
-    cleaned = v.strip()
-    if not re.match(r'^[a-zA-Z0-9\-\_\.@]+$', cleaned):
-        raise ValueError("Roll number contains invalid characters")
-    
-    if len(cleaned) > 50:
-        raise ValueError("Roll number too long")
-    
-    return cleaned.upper()
+    def validate_roll_number(cls, v):
+        if not v or len(v.strip()) < 1:
+            raise ValueError("Roll number is required")
+        
+        # More permissive regex - allow more characters
+        import re
+        cleaned = v.strip()
+        if not re.match(r'^[a-zA-Z0-9\-\_\.@]+$', cleaned):
+            raise ValueError("Roll number contains invalid characters")
+        
+        if len(cleaned) > 50:
+            raise ValueError("Roll number too long")
+        
+        return cleaned.upper()
 
     
 
