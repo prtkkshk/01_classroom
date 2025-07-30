@@ -169,7 +169,8 @@ if ENHANCED_FEATURES_AVAILABLE:
     try:
         app.middleware("http")(logging_middleware)
         app.middleware("http")(security_middleware_func)
-        app.middleware("http")(error_handling_middleware)
+        # Temporarily disable error_handling_middleware to debug 500 errors
+        # app.middleware("http")(error_handling_middleware)
         logger.info("Enhanced middleware added successfully")
     except Exception as e:
         logger.warning(f"Failed to add enhanced middleware: {e}")
@@ -2214,18 +2215,6 @@ async def shutdown_event():
     logger.info("Classroom Live API shutdown complete")
 
 # Error handlers
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": True,
-            "message": exc.detail,
-            "status_code": exc.status_code,
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    )
-
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc):
     return JSONResponse(
