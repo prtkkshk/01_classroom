@@ -99,18 +99,10 @@ class RequestLogger:
             "content_length": response.headers.get("content-length", 0),
         }
         
-        # Add user info if authenticated
-        auth_header = request.headers.get("authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            log_data["authenticated"] = True
-        else:
-            log_data["authenticated"] = False
-        
-        # Log based on status code
         if response.status_code >= 400:
-            self.logger.warning(json.dumps(log_data))
+            self.logger.warning(f"Request failed: {log_data}")
         else:
-            self.logger.info(json.dumps(log_data))
+            self.logger.info(f"Request completed: {log_data}")
 
 # Global instances
 rate_limiter = None
@@ -124,62 +116,52 @@ async def setup_middleware(redis_client: redis.Redis):
 
 async def rate_limit_middleware(request: Request, call_next):
     """Rate limiting middleware"""
-    if rate_limiter is None:
-        return await call_next(request)
+    if rate_limiter and request.url.path.startswith("/api"):
+        # Determine rate limit type based on endpoint
+        limit_type = "default"
+        if request.url.path in ["/api/login", "/api/register"]:
+            limit_type = "login"
+        elif request.url.path == "/api/register":
+            limit_type = "register"
+        elif request.url.path.startswith("/api/admin"):
+            limit_type = "admin"
+        
+        client_key = rate_limiter.get_client_key(request, limit_type)
+        
+        if await rate_limiter.is_rate_limited(client_key, limit_type):
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": True,
+                    "message": "Rate limit exceeded. Please try again later.",
+                    "status_code": 429,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
     
-    # Determine rate limit type based on endpoint
-    path = request.url.path
-    limit_type = "default"
-    
-    if "/login" in path:
-        limit_type = "login"
-    elif "/register" in path:
-        limit_type = "register"
-    elif "/admin" in path:
-        limit_type = "admin"
-    
-    # Get client key and check rate limit
-    client_key = rate_limiter.get_client_key(request, limit_type)
-    is_limited = await rate_limiter.is_rate_limited(client_key, limit_type)
-    
-    if is_limited:
-        return JSONResponse(
-            status_code=429,
-            content={
-                "error": True,
-                "message": "Rate limit exceeded. Please try again later.",
-                "status_code": 429,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        )
-    
-    return await call_next(request)
+    response = await call_next(request)
+    return response
 
 async def security_middleware_func(request: Request, call_next):
-    """Security middleware"""
-    start_time = time.time()
-    
-    # Process request
+    """Security headers middleware"""
     response = await call_next(request)
-    
-    # Add security headers
     security_middleware.add_security_headers(response)
     
-    # Log request
-    duration = time.time() - start_time
-    request_logger.log_request(request, response, duration)
+    # Add CORS headers
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
     
     return response
 
 async def error_handling_middleware(request: Request, call_next):
     """Error handling middleware"""
     try:
-        return await call_next(request)
+        response = await call_next(request)
+        return response
     except Exception as e:
-        # Log the error
-        logger.error(f"Unhandled error: {str(e)}", exc_info=True)
-        
-        # Return generic error response
+        logger.error(f"Unhandled exception: {e}")
         return JSONResponse(
             status_code=500,
             content={
@@ -188,4 +170,27 @@ async def error_handling_middleware(request: Request, call_next):
                 "status_code": 500,
                 "timestamp": datetime.utcnow().isoformat()
             }
-        ) 
+        )
+
+async def logging_middleware(request: Request, call_next):
+    """Request logging middleware"""
+    start_time = time.time()
+    
+    try:
+        response = await call_next(request)
+        duration = time.time() - start_time
+        request_logger.log_request(request, response, duration)
+        return response
+    except Exception as e:
+        duration = time.time() - start_time
+        error_response = JSONResponse(
+            status_code=500,
+            content={
+                "error": True,
+                "message": "Internal server error",
+                "status_code": 500,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        )
+        request_logger.log_request(request, error_response, duration)
+        return error_response 

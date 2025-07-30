@@ -1,19 +1,24 @@
 # Deployment fix - Force redeploy with CORS and CSP headers $(date)
 # This comment ensures the latest version is deployed with security headers
 
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, WebSocket, WebSocketDisconnect, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
+import re
+from email_validator import validate_email, EmailNotValidError
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any
 import uuid
 import random
@@ -24,7 +29,6 @@ from passlib.context import CryptContext
 import json
 from collections import defaultdict
 import asyncio
-from fastapi.responses import JSONResponse
 from bson import ObjectId
 import time
 try:
@@ -41,15 +45,15 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 client = AsyncIOMotorClient(
     mongo_url,
-    maxPoolSize=50,  # Maximum number of connections in the pool
-    minPoolSize=10,  # Minimum number of connections in the pool
-    maxIdleTimeMS=30000,  # Close connections after 30 seconds of inactivity
-    serverSelectionTimeoutMS=5000,  # Timeout for server selection
-    connectTimeoutMS=10000,  # Connection timeout
-    socketTimeoutMS=5000,  # Socket timeout
-    retryWrites=True,  # Enable retry writes
-    retryReads=True,  # Enable retry reads
-    w="majority"  # Write concern
+    maxPoolSize=50,
+    minPoolSize=10,
+    maxIdleTimeMS=30000,
+    serverSelectionTimeoutMS=5000,
+    connectTimeoutMS=10000,
+    socketTimeoutMS=5000,
+    retryWrites=True,
+    retryReads=True,
+    w="majority"
 )
 db = client[os.environ.get('DB_NAME', 'classroom_live')]
 
@@ -72,7 +76,7 @@ async def get_redis():
         return redis_client
     except Exception as e:
         logger.warning(f"Redis connection failed: {e}. Using in-memory fallback.")
-        redis_client = None  # Reset to None so we can retry later
+        redis_client = None
         return None
 
 # Security
@@ -84,7 +88,7 @@ if SECRET_KEY == 'your-secret-key-here-change-in-production':
     logging.warning("[SECURITY] SECRET_KEY is using the default value! Set SECRET_KEY in your environment for production.")
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 # Create the main app
 app = FastAPI(
@@ -97,7 +101,6 @@ app = FastAPI(
 # Enhanced CORS middleware with production-ready configuration
 allowed_origins = os.environ.get('ALLOWED_ORIGINS', 'http://localhost:3000,http://localhost:3001').split(',')
 if os.environ.get('ENVIRONMENT') == 'production':
-    # In production, be more restrictive
     allowed_origins = [
         "https://classroom-live.com",
         "https://www.classroom-live.com",
@@ -110,10 +113,27 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
-    max_age=3600,  # Cache preflight requests for 1 hour
+    expose_headers=["*"]
 )
+
+# Add trusted host middleware for security
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["*"]  # Configure appropriately for production
+)
+
+# Add custom middleware if available
+if ENHANCED_FEATURES_AVAILABLE:
+    try:
+        from middleware import logging_middleware, security_middleware_func, error_handling_middleware
+        app.middleware("http")(logging_middleware)
+        app.middleware("http")(security_middleware_func)
+        app.middleware("http")(error_handling_middleware)
+        logger.info("Enhanced middleware added successfully")
+    except Exception as e:
+        logger.warning(f"Failed to add enhanced middleware: {e}")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -133,15 +153,73 @@ PROFESSOR_PASSWORD = "60201professor"
 MODERATOR_USERNAME = "pepper_moderator"
 MODERATOR_PASSWORD = "pepper_14627912"
 
-# Pydantic Models
+# In-memory session storage fallback
+session_storage = {}
+active_sessions = set()
+
+# Global session manager
+session_manager = None
+
+# Input validation and sanitization functions
+def sanitize_input(text: str) -> str:
+    """Sanitize input to prevent XSS and injection attacks"""
+    if not text:
+        return ""
+    
+    # Remove potentially dangerous characters
+    dangerous_chars = ['<', '>', '"', "'", '&', ';', '(', ')', '{', '}', '[', ']']
+    for char in dangerous_chars:
+        text = text.replace(char, '')
+    
+    # Remove newlines and tabs
+    text = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+    
+    # Remove multiple spaces
+    text = ' '.join(text.split())
+    
+    return text.strip()
+
+def validate_email_format(email: str) -> bool:
+    """Validate email format using email-validator"""
+    try:
+        validate_email(email)
+        return True
+    except EmailNotValidError:
+        return False
+
+def validate_password_strength(password: str) -> bool:
+    """Validate password strength"""
+    if len(password) < 8:
+        return False
+    
+    # Check for at least one uppercase, one lowercase, one digit
+    has_upper = any(c.isupper() for c in password)
+    has_lower = any(c.islower() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+    
+    return has_upper and has_lower and has_digit
+
+def validate_roll_number(roll_number: str) -> bool:
+    """Validate roll number format"""
+    # Allow alphanumeric with hyphens and underscores
+    pattern = r'^[a-zA-Z0-9_-]+$'
+    return bool(re.match(pattern, roll_number)) and len(roll_number) <= 20
+
+def validate_userid(userid: str) -> bool:
+    """Validate user ID format"""
+    # Allow alphanumeric with hyphens and underscores
+    pattern = r'^[a-zA-Z0-9_-]+$'
+    return bool(re.match(pattern, userid)) and len(userid) <= 20
+
+# Enhanced Pydantic models with validation
 class User(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     email: str
     password_hash: str
     role: str  # "student", "professor", "moderator"
     name: str
-    roll_number: Optional[str] = None  # For students (acts as username)
-    userid: Optional[str] = None  # For professors/moderators (acts as username)
+    roll_number: Optional[str] = None
+    userid: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     last_active: Optional[datetime] = None
 
@@ -151,15 +229,82 @@ class UserCreate(BaseModel):
     name: str
     roll_number: str
 
+    @validator('email')
+    def validate_email(cls, v):
+        v = v.strip().lower()
+        if not validate_email_format(v):
+            raise ValueError('Invalid email format')
+        return v
+
+    @validator('password')
+    def validate_password(cls, v):
+        if not validate_password_strength(v):
+            raise ValueError('Password must be at least 8 characters with uppercase, lowercase, and digit')
+        return v
+
+    @validator('name')
+    def validate_name(cls, v):
+        v = sanitize_input(v)
+        if len(v) < 2 or len(v) > 50:
+            raise ValueError('Name must be between 2 and 50 characters')
+        return v
+
+    @validator('roll_number')
+    def validate_roll_number(cls, v):
+        v = sanitize_input(v)
+        if not validate_roll_number(v):
+            raise ValueError('Invalid roll number format')
+        return v
+
 class UserCreateProfessor(BaseModel):
     name: str
     userid: str
     email: str
     password: str
 
+    @validator('email')
+    def validate_email(cls, v):
+        v = v.strip().lower()
+        if not validate_email_format(v):
+            raise ValueError('Invalid email format')
+        return v
+
+    @validator('password')
+    def validate_password(cls, v):
+        if not validate_password_strength(v):
+            raise ValueError('Password must be at least 8 characters with uppercase, lowercase, and digit')
+        return v
+
+    @validator('name')
+    def validate_name(cls, v):
+        v = sanitize_input(v)
+        if len(v) < 2 or len(v) > 50:
+            raise ValueError('Name must be between 2 and 50 characters')
+        return v
+
+    @validator('userid')
+    def validate_userid(cls, v):
+        v = sanitize_input(v)
+        if not validate_userid(v):
+            raise ValueError('Invalid user ID format')
+        return v
+
 class UserLogin(BaseModel):
     username: str
     password: str
+
+    @validator('username')
+    def validate_username(cls, v):
+        v = sanitize_input(v)
+        if len(v) < 1:
+            raise ValueError('Username cannot be empty')
+        return v
+
+    @validator('password')
+    def validate_password(cls, v):
+        if len(v) < 1:
+            raise ValueError('Password cannot be empty')
+        return v
 
 class Token(BaseModel):
     access_token: str
@@ -389,53 +534,71 @@ class ConnectionManager:
 # Create connection manager instance
 manager = ConnectionManager()
 
+# Include the API router
+app.include_router(api_router)
+
 # Authentication function
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    
-    token = credentials.credentials
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
-            raise credentials_exception
-    except jwt.PyJWTError:
-        raise credentials_exception
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Could not validate credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
-    # Try to find user by roll_number first (students), then by userid (professors/moderators)
-    user = await db.users.find_one({"roll_number": username})
-    if not user:
-        user = await db.users.find_one({"userid": username})
-    
-    if user is None:
-        raise credentials_exception
-    
-    # Update last active timestamp
-    await db.users.update_one(
-        {"id": user["id"]},
-        {"$set": {"last_active": datetime.utcnow()}}
-    )
-    
-    # Re-add to session manager if not present
-    if not await session_manager.is_token_valid(token):
-        username_field = user.get("roll_number") if user["role"] == "student" else user.get("userid")
-        user_data_dict = {
-            "id": user["id"],
-            "username": username_field,
-            "email": user["email"],
-            "role": user["role"],
-            "name": user["name"],
-            "roll_number": user.get("roll_number"),
-            "userid": user.get("userid")
-        }
-        await session_manager.add_session(token, user_data_dict)
-    
-    return User(**user)
+    try:
+        # Try to find user by roll_number first (students), then by userid (professors/moderators)
+        user = await db.users.find_one({"roll_number": username})
+        if not user:
+            user = await db.users.find_one({"userid": username})
+        
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Convert ObjectId to string for JSON serialization
+        user["_id"] = str(user["_id"])
+        
+        # Update last active timestamp
+        await db.users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"last_active": datetime.utcnow()}}
+        )
+        
+        return User(**user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Database error in get_current_user: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error",
+        )
 
 # Optional authentication for WebSocket
 async def get_user_from_token(token: str):
@@ -506,19 +669,6 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
 @api_router.post("/register", response_model=Token)
 async def register(user_data: UserCreate):
     try:
-        # Validate input data
-        if not user_data.name or not user_data.name.strip():
-            raise HTTPException(status_code=422, detail="Name is required")
-        
-        if not user_data.roll_number or not user_data.roll_number.strip():
-            raise HTTPException(status_code=422, detail="Roll number is required")
-        
-        if not user_data.email or not user_data.email.strip():
-            raise HTTPException(status_code=422, detail="Email is required")
-        
-        if not user_data.password or len(user_data.password) < 6:
-            raise HTTPException(status_code=422, detail="Password must be at least 6 characters")
-        
         # Check if roll number already exists
         existing_roll = await db.users.find_one({"roll_number": user_data.roll_number})
         if existing_roll:
@@ -557,9 +707,6 @@ async def register(user_data: UserCreate):
             "name": user_obj.name,
             "roll_number": user_obj.roll_number
         }
-        
-        # Add to session manager
-        await session_manager.add_session(access_token, user_data_dict)
         
         return {
             "access_token": access_token,
@@ -667,18 +814,51 @@ async def login(user_credentials: UserLogin):
         }
     
     # Regular user login
-    user = await db.users.find_one({"roll_number": user_credentials.username})
-    if not user:
-        user = await db.users.find_one({"userid": user_credentials.username})
-    
-    if not user or not verify_password(user_credentials.password, user["password_hash"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect roll number/user ID or password",
-            headers={"WWW-Authenticate": "Bearer"},
+    try:
+        user = await db.users.find_one({"roll_number": user_credentials.username})
+        if not user:
+            user = await db.users.find_one({"userid": user_credentials.username})
+        
+        if not user or not verify_password(user_credentials.password, user["password_hash"]):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Convert ObjectId to string for JSON serialization
+        user["_id"] = str(user["_id"])
+        
+        username_field = user.get("roll_number") if user["role"] == "student" else user.get("userid")
+        
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": username_field}, expires_delta=access_token_expires
         )
-    
-    username_field = user.get("roll_number") if user["role"] == "student" else user.get("userid")
+        
+        user_data_dict = {
+            "id": user["id"],
+            "username": username_field,
+            "email": user["email"],
+            "role": user["role"],
+            "name": user["name"],
+            "roll_number": user.get("roll_number"),
+            "userid": user.get("userid")
+        }
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": user_data_dict
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error during login",
+        )
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
@@ -1378,7 +1558,14 @@ async def get_admin_stats(current_user: User = Depends(get_current_user)):
         total_enrollments += len(course.get("students", []))
     
     # Get active sessions
-    active_sessions = session_manager.get_active_users_count()
+    try:
+        if session_manager:
+            active_sessions = await session_manager.get_active_users_count()
+        else:
+            active_sessions = 0
+    except Exception as e:
+        logger.error(f"Error getting active sessions: {e}")
+        active_sessions = 0
     
     return {
         "total_users": users_count,
@@ -1401,36 +1588,31 @@ async def get_active_sessions(current_user: User = Depends(get_current_user)):
     if current_user.role != "moderator":
         raise HTTPException(status_code=403, detail="Only moderators can access this endpoint")
     
-    if session_manager is None:
+    try:
+        if session_manager is None:
+            return {
+                "total_active_sessions": 0,
+                "unique_users": 0,
+                "user_sessions": {}
+            }
+        
+        # Get session statistics from session manager
+        stats = await session_manager.get_session_stats()
+        
+        return {
+            "total_active_sessions": stats.get("total_sessions", 0),
+            "unique_users": stats.get("active_users", 0),
+            "user_sessions": {},
+            "storage_type": stats.get("storage_type", "unknown")
+        }
+    except Exception as e:
+        logger.error(f"Error getting active sessions: {e}")
         return {
             "total_active_sessions": 0,
             "unique_users": 0,
-            "user_sessions": {}
+            "user_sessions": {},
+            "error": "Failed to retrieve session data"
         }
-    
-    active_sessions = session_manager.active_sessions
-    session_count = len(active_sessions)
-    
-    # Group by user
-    user_session_count = defaultdict(int)
-    user_details = {}
-    
-    for user_data in active_sessions.values():
-        username = user_data['username']
-        user_session_count[username] += 1
-        if username not in user_details:
-            user_details[username] = {
-                "name": user_data.get('name', 'Unknown'),
-                "role": user_data.get('role', 'Unknown'),
-                "sessions": 0
-            }
-        user_details[username]["sessions"] += 1
-    
-    return {
-        "total_active_sessions": session_count,
-        "unique_users": len(user_session_count),
-        "user_sessions": user_details
-    }
 
 # Additional admin endpoints for full CRUD
 @api_router.delete("/admin/questions/{question_id}")
@@ -1722,6 +1904,7 @@ async def startup_event():
         logger.warning("Redis not available, using in-memory session manager")
     
     # Initialize enhanced session manager
+    global session_manager
     if redis_client and ENHANCED_FEATURES_AVAILABLE:
         try:
             session_manager = EnhancedSessionManager(redis_client)
@@ -1729,10 +1912,10 @@ async def startup_event():
             logger.info("Enhanced session manager initialized with Redis")
         except Exception as e:
             logger.error(f"Failed to initialize enhanced session manager: {e}")
-            session_manager = SessionManager()
+            session_manager = EnhancedSessionManager()  # Use memory fallback
             logger.info("Falling back to in-memory session manager")
     else:
-        session_manager = SessionManager()
+        session_manager = EnhancedSessionManager()  # Use memory fallback
         logger.info("Using in-memory session manager (Redis or enhanced features not available)")
     
     # Create indexes for better performance and scalability
