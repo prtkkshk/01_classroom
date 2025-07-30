@@ -539,6 +539,7 @@ app.include_router(api_router)
 # Authentication function
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     if not credentials:
+        logger.warning("No credentials provided in request")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -549,18 +550,22 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
+            logger.warning("JWT payload missing 'sub' field")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        logger.info(f"JWT validated for username: {username}")
     except jwt.ExpiredSignatureError:
+        logger.warning("JWT token expired")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has expired",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except jwt.JWTError:
+    except jwt.JWTError as e:
+        logger.warning(f"JWT validation error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
@@ -574,11 +579,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             user = await db.users.find_one({"userid": username})
         
         if user is None:
+            logger.warning(f"User not found for username: {username}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        
+        logger.info(f"User found: {user.get('name', 'Unknown')} with role: {user.get('role', 'Unknown')}")
         
         # Convert ObjectId to string for JSON serialization
         user["_id"] = str(user["_id"])
@@ -911,6 +919,8 @@ async def create_course(course_data: CourseCreate, current_user: User = Depends(
 @api_router.get("/courses", response_model=List[Course])
 async def get_courses(current_user: User = Depends(get_current_user)):
     try:
+        logger.info(f"User accessing courses: {current_user.id}, role: {current_user.role}")
+        
         if current_user.role == "professor":
             courses = await db.courses.find({"professor_id": current_user.id, "is_active": True}).to_list(1000)
         elif current_user.role == "student":
@@ -921,7 +931,10 @@ async def get_courses(current_user: User = Depends(get_current_user)):
             raise HTTPException(status_code=403, detail="Invalid role")
         
         courses = fix_mongo_ids(courses)
+        logger.info(f"Found {len(courses)} courses for user {current_user.id}")
         return [Course(**course) for course in courses]
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in get_courses: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
