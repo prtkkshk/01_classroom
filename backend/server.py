@@ -109,15 +109,44 @@ if os.environ.get('ENVIRONMENT') == 'production':
         "https://zero1-classroom-1.onrender.com",
         "https://zero1-classroom-2.onrender.com"
     ]
+else:
+    # For development, be more specific
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001"
+    ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=True,  
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
     expose_headers=["*"]
 )
+
+# Security middleware for adding security headers
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    
+    # Add security headers
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self' data:; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' ws: wss:;"
+    )
+    
+    return response
 
 # Import enhanced components first
 try:
@@ -238,25 +267,27 @@ class UserCreate(BaseModel):
 
     @validator('password')
     def validate_password(cls, v):
-        if not validate_password_strength(v):
-            raise ValueError('Password must be at least 8 characters with at least one letter and one digit')
+        if len(v) < 6:  # Make password requirement less strict
+            raise ValueError('Password must be at least 6 characters')
         return v
 
     @validator('name')
     def validate_name(cls, v):
         v = sanitize_input(v)
-        if len(v) < 2 or len(v) > 50:
-            raise ValueError('Name must be between 2 and 50 characters')
-        # Allow normal names with spaces, hyphens, apostrophes, and common characters
-        # More permissive regex to allow international names and common formats
-        if not re.match(r'^[a-zA-Z0-9\s\-\'\.]+$', v):
+        if len(v) < 1 or len(v) > 100:  # More lenient length
+            raise ValueError('Name must be between 1 and 100 characters')
+        # More permissive regex to allow international names
+        if not re.match(r'^[a-zA-Z0-9\s\-\'\.àáâãäåæçèéêëìíîïðñòóôõöøùúûüýþÿ]+$', v, re.IGNORECASE):
             raise ValueError('Name contains invalid characters')
         return v
 
     @validator('roll_number')
     def validate_roll_number(cls, v):
         v = sanitize_input(v)
-        if not validate_roll_number(v):
+        if len(v) < 1 or len(v) > 50:  # More lenient
+            raise ValueError('Roll number must be between 1 and 50 characters')
+        # More permissive pattern
+        if not re.match(r'^[a-zA-Z0-9\s\-_\.]+$', v):
             raise ValueError('Invalid roll number format')
         return v
 
@@ -598,12 +629,13 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         logger.info(f"User found: {user.get('name', 'Unknown')} with role: {user.get('role', 'Unknown')}")
         
         # Convert ObjectId to string for JSON serialization
-        user["_id"] = str(user["_id"])
+        if "_id" in user:
+            user["_id"] = str(user["_id"])
         
         # Update last active timestamp
         try:
             await db.users.update_one(
-                {"_id": user["_id"]},
+                {"_id": ObjectId(user["_id"]) if isinstance(user["_id"], str) else user["_id"]},
                 {"$set": {"last_active": datetime.utcnow()}}
             )
         except Exception as e:
@@ -616,9 +648,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     except Exception as e:
         logger.error(f"Database error in get_current_user: {e}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database connection error"
         )
 
 # Optional authentication for WebSocket
@@ -627,45 +658,63 @@ async def get_user_from_token(token: str):
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
+            logger.warning("JWT payload missing 'sub' field in WebSocket auth")
             return None
-    except jwt.PyJWTError:
+    except jwt.ExpiredSignatureError:
+        logger.warning("JWT token expired in WebSocket auth")
+        return None
+    except jwt.JWTError as e:
+        logger.warning(f"JWT validation error in WebSocket auth: {str(e)}")
         return None
     
-    user = await db.users.find_one({"roll_number": username})
-    if not user:
-        user = await db.users.find_one({"userid": username})
-    
-    return user
+    try:
+        # Try to find user by roll_number first (students), then by userid (professors/moderators)
+        user = await db.users.find_one({"roll_number": username})
+        if not user:
+            user = await db.users.find_one({"userid": username})
+        
+        if user is None:
+            logger.warning(f"User not found for username in WebSocket auth: {username}")
+            return None
+        
+        # Convert ObjectId to string for JSON serialization
+        if "_id" in user:
+            user["_id"] = str(user["_id"])
+        
+        logger.info(f"WebSocket user authenticated: {user.get('name', 'Unknown')} with role: {user.get('role', 'Unknown')}")
+        return user
+    except Exception as e:
+        logger.error(f"Database error in WebSocket get_user_from_token: {e}")
+        return None
 
 # WebSocket endpoint
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
-    user_data = {"id": "anonymous", "username": "anonymous", "role": "guest"}
-    
-    if token:
-        user = await get_user_from_token(token)
-        if user:
-            username_field = user.get("roll_number") if user["role"] == "student" else user.get("userid")
-            user_data = {
-                "id": user["id"],
-                "username": username_field,
-                "role": user["role"],
-                "name": user["name"]
-            }
-    
-    await manager.connect(websocket, user_data)
-    
     try:
+        user_data = {"id": "anonymous", "username": "anonymous", "role": "guest"}
+        
+        if token:
+            user = await get_user_from_token(token)
+            if user:
+                username_field = user.get("roll_number") if user["role"] == "student" else user.get("userid")
+                user_data = {
+                    "id": user["id"],
+                    "username": username_field,
+                    "role": user["role"],
+                    "name": user["name"]
+                }
+        
+        await manager.connect(websocket, user_data)
+        
         while True:
-            data = await websocket.receive_text()
             try:
+                data = await websocket.receive_text()
                 message_data = json.loads(data)
                 message_type = message_data.get("type")
                 
                 if message_type == "join_course":
                     course_id = message_data.get("course_id")
                     if course_id and user_data["id"] != "anonymous":
-                        # Verify user has access to course
                         course = await db.courses.find_one({"id": course_id})
                         if course and (user_data["id"] == course["professor_id"] or user_data["id"] in course.get("students", [])):
                             await manager.send_personal_message(
@@ -678,12 +727,21 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
                         json.dumps({"type": "pong", "timestamp": datetime.utcnow().isoformat()}),
                         websocket
                     )
-                
+                    
             except json.JSONDecodeError:
-                # Handle plain text messages
                 await manager.broadcast(f"Message from {user_data['username']}: {data}")
+            except Exception as e:
+                logger.error(f"WebSocket message error: {e}")
+                break
                 
     except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket connection error: {e}")
+        try:
+            await websocket.close()
+        except:
+            pass
         manager.disconnect(websocket)
 
 # Auth Routes
@@ -699,20 +757,32 @@ async def register(user_data: UserCreate):
         if existing_email:
             raise HTTPException(status_code=400, detail="Email already registered")
         
-        # Create new user
+        # Create new user with unique ID
         user_dict = user_data.model_dump()
         user_dict["password_hash"] = get_password_hash(user_data.password)
         user_dict["role"] = "student"
+        user_dict["id"] = str(uuid.uuid4())  # Ensure unique ID
         user_dict.pop("password")
         
         user_obj = User(**user_dict)
+        
         try:
-            await db.users.insert_one(user_obj.model_dump())
-        except Exception as e:
-            # Handle duplicate key error (race condition)
-            if "duplicate key error" in str(e):
+            # Use upsert to handle race conditions
+            result = await db.users.replace_one(
+                {"$or": [{"email": user_data.email}, {"roll_number": user_data.roll_number}]},
+                user_obj.model_dump(),
+                upsert=True
+            )
+            
+            # If matched_count > 0, it means user already exists
+            if result.matched_count > 0:
                 raise HTTPException(status_code=400, detail="Email or roll number already registered")
-            raise
+                
+        except Exception as e:
+            if "duplicate key error" in str(e).lower() or "11000" in str(e):
+                raise HTTPException(status_code=400, detail="Email or roll number already registered")
+            logger.error(f"Database error during registration: {e}")
+            raise HTTPException(status_code=500, detail="Registration failed due to database error")
         
         # Create access token
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -750,115 +820,120 @@ async def register(user_data: UserCreate):
 
 @api_router.post("/login", response_model=Token)
 async def login(user_credentials: UserLogin):
-    # Check if it's moderator login
-    if user_credentials.username == MODERATOR_USERNAME and user_credentials.password == MODERATOR_PASSWORD:
-        moderator = await db.users.find_one({"userid": MODERATOR_USERNAME})
-        if not moderator:
-            moderator = await db.users.find_one({"role": "moderator"})
-            if moderator and not moderator.get("userid"):
-                await db.users.update_one(
-                    {"id": moderator["id"]}, 
-                    {"$set": {"userid": MODERATOR_USERNAME}}
-                )
-                moderator["userid"] = MODERATOR_USERNAME
-        
-        if not moderator:
-            moderator_user = User(
-                id=str(uuid.uuid4()),
-                email="moderator@classroom.com",
-                password_hash=get_password_hash(MODERATOR_PASSWORD),
-                role="moderator",
-                name="Moderator",
-                userid=MODERATOR_USERNAME
-            )
-            await db.users.insert_one(moderator_user.model_dump())
-            moderator = moderator_user.model_dump()
-        
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = create_access_token(
-            data={"sub": MODERATOR_USERNAME}, expires_delta=access_token_expires
-        )
-        
-        user_data_dict = {
-            "id": moderator["id"],
-            "username": moderator["userid"],
-            "email": moderator["email"],
-            "role": moderator["role"],
-            "name": moderator.get("name", "Moderator"),
-            "userid": moderator["userid"]
-        }
-        
-        try:
-            if session_manager:
-                await session_manager.add_session(access_token, user_data_dict)
-        except Exception as e:
-            logger.warning(f"Failed to add session: {e}")
-            # Continue without session if session manager fails
-        
-        return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": user_data_dict
-        }
-    
-    # Check if it's professor login
-    if user_credentials.username == PROFESSOR_USERNAME and user_credentials.password == PROFESSOR_PASSWORD:
-        professor = await db.users.find_one({"userid": PROFESSOR_USERNAME})
-        if not professor:
-            professor = await db.users.find_one({"role": "professor"})
-            if professor and not professor.get("userid"):
-                await db.users.update_one(
-                    {"id": professor["id"]}, 
-                    {"$set": {"userid": PROFESSOR_USERNAME}}
-                )
-                professor["userid"] = PROFESSOR_USERNAME
-        
-        if not professor:
-            professor_user = User(
-                id=str(uuid.uuid4()),
-                email="professor@classroom.com",
-                password_hash=get_password_hash(PROFESSOR_PASSWORD),
-                role="professor",
-                name="Professor",
-                userid=PROFESSOR_USERNAME
-            )
-            await db.users.insert_one(professor_user.model_dump())
-            professor = professor_user.model_dump()
-        
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = create_access_token(
-            data={"sub": PROFESSOR_USERNAME}, expires_delta=access_token_expires
-        )
-        
-        user_data_dict = {
-            "id": professor["id"],
-            "username": professor["userid"],
-            "email": professor["email"],
-            "role": professor["role"],
-            "name": professor.get("name", "Professor"),
-            "userid": professor["userid"]
-        }
-        
-        try:
-            if session_manager:
-                await session_manager.add_session(access_token, user_data_dict)
-        except Exception as e:
-            logger.warning(f"Failed to add session: {e}")
-            # Continue without session if session manager fails
-        
-        return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "user": user_data_dict
-        }
-    
-    # Regular user login
     try:
+        # Check if it's moderator login
+        if user_credentials.username == MODERATOR_USERNAME and user_credentials.password == MODERATOR_PASSWORD:
+            moderator = await db.users.find_one({"userid": MODERATOR_USERNAME})
+            if not moderator:
+                moderator = await db.users.find_one({"role": "moderator"})
+                if moderator and not moderator.get("userid"):
+                    await db.users.update_one(
+                        {"id": moderator["id"]}, 
+                        {"$set": {"userid": MODERATOR_USERNAME}}
+                    )
+                    moderator["userid"] = MODERATOR_USERNAME
+            
+            if not moderator:
+                moderator_user = User(
+                    id=str(uuid.uuid4()),
+                    email="moderator@classroom.com",
+                    password_hash=get_password_hash(MODERATOR_PASSWORD),
+                    role="moderator",
+                    name="Moderator",
+                    userid=MODERATOR_USERNAME
+                )
+                await db.users.insert_one(moderator_user.model_dump())
+                moderator = moderator_user.model_dump()
+            
+            access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            access_token = create_access_token(
+                data={"sub": MODERATOR_USERNAME}, expires_delta=access_token_expires
+            )
+            
+            user_data_dict = {
+                "id": moderator["id"],
+                "username": moderator["userid"],
+                "email": moderator["email"],
+                "role": moderator["role"],
+                "name": moderator.get("name", "Moderator"),
+                "userid": moderator["userid"]
+            }
+            
+            try:
+                if session_manager:
+                    await session_manager.add_session(access_token, user_data_dict)
+            except Exception as e:
+                logger.warning(f"Failed to add session: {e}")
+            
+            return {
+                "access_token": access_token,
+                "token_type": "bearer",
+                "user": user_data_dict
+            }
+        
+        # Check if it's professor login
+        if user_credentials.username == PROFESSOR_USERNAME and user_credentials.password == PROFESSOR_PASSWORD:
+            professor = await db.users.find_one({"userid": PROFESSOR_USERNAME})
+            if not professor:
+                professor = await db.users.find_one({"role": "professor"})
+                if professor and not professor.get("userid"):
+                    await db.users.update_one(
+                        {"id": professor["id"]}, 
+                        {"$set": {"userid": PROFESSOR_USERNAME}}
+                    )
+                    professor["userid"] = PROFESSOR_USERNAME
+            
+            if not professor:
+                professor_user = User(
+                    id=str(uuid.uuid4()),
+                    email="professor@classroom.com",
+                    password_hash=get_password_hash(PROFESSOR_PASSWORD),
+                    role="professor",
+                    name="Professor",
+                    userid=PROFESSOR_USERNAME
+                )
+                await db.users.insert_one(professor_user.model_dump())
+                professor = professor_user.model_dump()
+            
+            access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            access_token = create_access_token(
+                data={"sub": PROFESSOR_USERNAME}, expires_delta=access_token_expires
+            )
+            
+            user_data_dict = {
+                "id": professor["id"],
+                "username": professor["userid"],
+                "email": professor["email"],
+                "role": professor["role"],
+                "name": professor.get("name", "Professor"),
+                "userid": professor["userid"]
+            }
+            
+            try:
+                if session_manager:
+                    await session_manager.add_session(access_token, user_data_dict)
+            except Exception as e:
+                logger.warning(f"Failed to add session: {e}")
+            
+            return {
+                "access_token": access_token,
+                "token_type": "bearer",
+                "user": user_data_dict
+            }
+        
+        # Regular user login
         user = await db.users.find_one({"roll_number": user_credentials.username})
         if not user:
             user = await db.users.find_one({"userid": user_credentials.username})
         
-        if not user or not verify_password(user_credentials.password, user["password_hash"]):
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            
+        if not verify_password(user_credentials.password, user["password_hash"]):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect username or password",
@@ -866,7 +941,8 @@ async def login(user_credentials: UserLogin):
             )
         
         # Convert ObjectId to string for JSON serialization
-        user["_id"] = str(user["_id"])
+        if "_id" in user:
+            user["_id"] = str(user["_id"])
         
         username_field = user.get("roll_number") if user["role"] == "student" else user.get("userid")
         
@@ -890,7 +966,6 @@ async def login(user_credentials: UserLogin):
                 await session_manager.add_session(access_token, user_data_dict)
         except Exception as e:
             logger.warning(f"Failed to add session: {e}")
-            # Continue without session if session manager fails
         
         return {
             "access_token": access_token,
@@ -902,8 +977,9 @@ async def login(user_credentials: UserLogin):
     except Exception as e:
         logger.error(f"Login error: {str(e)}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error during login",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Login failed",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
 @api_router.post("/logout")
@@ -1436,79 +1512,65 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
     if current_user.role != "moderator":
         raise HTTPException(status_code=403, detail="Only moderators can create professor accounts")
     
-    # Force redeployment - Professor creation fix with timestamp-based roll numbers
-    # This comment ensures the backend redeploys with the latest changes
-
-    # Debug: Log the incoming data
-    logger.info(f"Creating professor: {professor_data.email}, {professor_data.userid}")
-    
-    existing_email = await db.users.find_one({"email": professor_data.email})
-    if existing_email:
-        logger.warning(f"Email already exists: {professor_data.email}")
-        raise HTTPException(status_code=400, detail="Email already registered")
-    
-    existing_userid = await db.users.find_one({"userid": professor_data.userid})
-    if existing_userid:
-        logger.warning(f"UserID already exists: {professor_data.userid}")
-        raise HTTPException(status_code=400, detail="User ID already registered")
-    
     try:
+        # Check for existing users
+        existing_email = await db.users.find_one({"email": professor_data.email})
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        existing_userid = await db.users.find_one({"userid": professor_data.userid})
+        if existing_userid:
+            raise HTTPException(status_code=400, detail="User ID already registered")
+        
+        # Create professor with unique identifiers
         professor_dict = professor_data.model_dump()
+        professor_dict["id"] = str(uuid.uuid4())
         professor_dict["password_hash"] = get_password_hash(professor_data.password)
         professor_dict["role"] = "professor"
-        # Assign a unique timestamp-based roll number for professors to avoid duplicate key issues
-        import time
-        timestamp = int(time.time() * 1000)  # Use milliseconds for more uniqueness
-        professor_dict["roll_number"] = f"PROF_{timestamp}"
+        professor_dict["created_at"] = datetime.utcnow()
         professor_dict.pop("password")
         
-        professor_obj = User(**professor_dict)
+        # Ensure we don't have roll_number conflicts
+        professor_dict["roll_number"] = None
         
-        # Debug: Log the data being inserted
-        logger.info(f"Inserting professor: {professor_obj.model_dump()}")
+        professor_obj = User(**professor_dict)
         
         result = await db.users.insert_one(professor_obj.model_dump())
         logger.info(f"Professor created successfully: {result.inserted_id}")
         
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": professor_obj.userid}, expires_delta=access_token_expires
+        )
+        
+        user_data_dict = {
+            "id": professor_obj.id,
+            "username": professor_obj.userid,
+            "email": professor_obj.email,
+            "role": professor_obj.role,
+            "name": professor_obj.name,
+            "userid": professor_obj.userid
+        }
+        
+        try:
+            if session_manager:
+                await session_manager.add_session(access_token, user_data_dict)
+        except Exception as e:
+            logger.warning(f"Failed to add session for professor: {e}")
+        
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": user_data_dict
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error creating professor: {str(e)}")
-        logger.error(f"Error type: {type(e)}")
-        
-        # Only treat as duplicate key error if it's actually a MongoDB duplicate key error
-        if hasattr(e, 'code') and e.code == 11000:
+        if "duplicate key error" in str(e).lower() or "11000" in str(e):
             raise HTTPException(status_code=400, detail="User ID or email already exists")
-        elif "duplicate key error" in str(e).lower():
-            raise HTTPException(status_code=400, detail="User ID or email already exists")
-        else:
-            # Log the actual error for debugging
-            logger.error(f"Unexpected error creating professor: {e}")
-            raise HTTPException(status_code=500, detail=f"Error creating professor account: {str(e)}")
-    
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": professor_obj.userid}, expires_delta=access_token_expires
-    )
-    
-    user_data_dict = {
-        "id": professor_obj.id,
-        "username": professor_obj.userid,
-        "email": professor_obj.email,
-        "role": professor_obj.role,
-        "name": professor_obj.name,
-        "userid": professor_obj.userid
-    }
-    
-    try:
-        if session_manager:
-            await session_manager.add_session(access_token, user_data_dict)
-    except Exception as e:
-        logger.warning(f"Failed to add session for professor: {e}")
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user_data_dict
-    }
+        raise HTTPException(status_code=500, detail="Failed to create professor account")
 
 def fix_mongo_ids(doc):
     # Recursively convert ObjectId to str in a dict or list
