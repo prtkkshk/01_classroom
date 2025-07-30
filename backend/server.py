@@ -247,8 +247,9 @@ class UserCreate(BaseModel):
         v = sanitize_input(v)
         if len(v) < 2 or len(v) > 50:
             raise ValueError('Name must be between 2 and 50 characters')
-        # Allow normal names with spaces, hyphens, apostrophes
-        if not re.match(r'^[a-zA-Z\s\-\'\.]+$', v):
+        # Allow normal names with spaces, hyphens, apostrophes, and common characters
+        # More permissive regex to allow international names and common formats
+        if not re.match(r'^[a-zA-Z0-9\s\-\'\.]+$', v):
             raise ValueError('Name contains invalid characters')
         return v
 
@@ -283,8 +284,9 @@ class UserCreateProfessor(BaseModel):
         v = sanitize_input(v)
         if len(v) < 2 or len(v) > 50:
             raise ValueError('Name must be between 2 and 50 characters')
-        # Allow normal names with spaces, hyphens, apostrophes
-        if not re.match(r'^[a-zA-Z\s\-\'\.]+$', v):
+        # Allow normal names with spaces, hyphens, apostrophes, and common characters
+        # More permissive regex to allow international names and common formats
+        if not re.match(r'^[a-zA-Z0-9\s\-\'\.]+$', v):
             raise ValueError('Name contains invalid characters')
         return v
 
@@ -2145,6 +2147,10 @@ async def http_exception_handler(request, exc):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
+    # Don't catch HTTPExceptions - let them be handled by the specific handler
+    if isinstance(exc, HTTPException):
+        raise exc
+    
     logger.error(f"Unhandled exception: {str(exc)}")
     return JSONResponse(
         status_code=500,
