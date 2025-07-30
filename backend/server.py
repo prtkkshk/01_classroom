@@ -161,7 +161,7 @@ except ImportError:
 # Add trusted host middleware for security
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["localhost", "127.0.0.1", "0.0.0.0", "classroom-live.onrender.com", "classroom-live.vercel.app"]
+    allowed_hosts=["localhost", "127.0.0.1", "0.0.0.0", "classroom-live.onrender.com", "classroom-live.vercel.app", "zero1-classroom-1.onrender.com"]
 )
 
 # Add custom middleware if available
