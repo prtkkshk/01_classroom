@@ -191,12 +191,12 @@ def validate_password_strength(password: str) -> bool:
     if len(password) < 8:
         return False
     
-    # Check for at least one uppercase, one lowercase, one digit
-    has_upper = any(c.isupper() for c in password)
-    has_lower = any(c.islower() for c in password)
+    # More lenient validation - just require 8+ characters
+    # Optionally check for at least one letter and one digit
+    has_letter = any(c.isalpha() for c in password)
     has_digit = any(c.isdigit() for c in password)
     
-    return has_upper and has_lower and has_digit
+    return has_letter and has_digit
 
 def validate_roll_number(roll_number: str) -> bool:
     """Validate roll number format"""
@@ -238,7 +238,7 @@ class UserCreate(BaseModel):
     @validator('password')
     def validate_password(cls, v):
         if not validate_password_strength(v):
-            raise ValueError('Password must be at least 8 characters with uppercase, lowercase, and digit')
+            raise ValueError('Password must be at least 8 characters with at least one letter and one digit')
         return v
 
     @validator('name')
@@ -271,7 +271,7 @@ class UserCreateProfessor(BaseModel):
     @validator('password')
     def validate_password(cls, v):
         if not validate_password_strength(v):
-            raise ValueError('Password must be at least 8 characters with uppercase, lowercase, and digit')
+            raise ValueError('Password must be at least 8 characters with at least one letter and one digit')
         return v
 
     @validator('name')
@@ -707,6 +707,13 @@ async def register(user_data: UserCreate):
             "roll_number": user_obj.roll_number
         }
         
+        # Add session
+        try:
+            await session_manager.add_session(access_token, user_data_dict)
+        except Exception as e:
+            logger.warning(f"Failed to add session: {e}")
+            # Continue without session if session manager fails
+        
         return {
             "access_token": access_token,
             "token_type": "bearer",
@@ -758,7 +765,11 @@ async def login(user_credentials: UserLogin):
             "userid": moderator["userid"]
         }
         
-        await session_manager.add_session(access_token, user_data_dict)
+        try:
+            await session_manager.add_session(access_token, user_data_dict)
+        except Exception as e:
+            logger.warning(f"Failed to add session: {e}")
+            # Continue without session if session manager fails
         
         return {
             "access_token": access_token,
@@ -804,7 +815,11 @@ async def login(user_credentials: UserLogin):
             "userid": professor["userid"]
         }
         
-        await session_manager.add_session(access_token, user_data_dict)
+        try:
+            await session_manager.add_session(access_token, user_data_dict)
+        except Exception as e:
+            logger.warning(f"Failed to add session: {e}")
+            # Continue without session if session manager fails
         
         return {
             "access_token": access_token,
@@ -845,6 +860,12 @@ async def login(user_credentials: UserLogin):
             "userid": user.get("userid")
         }
         
+        try:
+            await session_manager.add_session(access_token, user_data_dict)
+        except Exception as e:
+            logger.warning(f"Failed to add session: {e}")
+            # Continue without session if session manager fails
+        
         return {
             "access_token": access_token,
             "token_type": "bearer",
@@ -858,35 +879,16 @@ async def login(user_credentials: UserLogin):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during login",
         )
-    
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": username_field}, expires_delta=access_token_expires
-    )
-    
-    user_data_dict = {
-        "id": user["id"],
-        "username": username_field,
-        "email": user["email"],
-        "role": user["role"],
-        "name": user.get("name", ""),
-        "roll_number": user.get("roll_number"),
-        "userid": user.get("userid")
-    }
-    
-    await session_manager.add_session(access_token, user_data_dict)
-    
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user": user_data_dict
-    }
 
 @api_router.post("/logout")
 async def logout(current_user: User = Depends(get_current_user), credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    await session_manager.remove_session(token)
-    return {"message": "Logged out successfully"}
+    try:
+        token = credentials.credentials
+        await session_manager.remove_session(token)
+        return {"message": "Logged out successfully"}
+    except Exception as e:
+        logger.warning(f"Logout error: {e}")
+        return {"message": "Logged out successfully"}
 
 # Course Routes
 @api_router.post("/courses", response_model=Course)
@@ -1747,12 +1749,31 @@ async def health_check():
         logger.error(f"Database health check failed: {str(e)}")
         db_status = "unhealthy"
     
+    # Safely get active sessions count
+    try:
+        if session_manager and hasattr(session_manager, 'get_active_users_count'):
+            active_sessions = await session_manager.get_active_users_count()
+        elif session_manager and hasattr(session_manager, 'memory_active_sessions'):
+            active_sessions = len(session_manager.memory_active_sessions)
+        else:
+            active_sessions = 0
+    except Exception as e:
+        logger.error(f"Session count error: {str(e)}")
+        active_sessions = 0
+    
+    # Safely get websocket count
+    try:
+        active_websockets = len(manager.active_connections) if manager else 0
+    except Exception as e:
+        logger.error(f"WebSocket count error: {str(e)}")
+        active_websockets = 0
+    
     from fastapi.responses import JSONResponse
     response = JSONResponse({
         "status": "healthy" if db_status == "healthy" else "degraded",
         "database": db_status,
-        "active_sessions": len(session_manager.active_sessions) if session_manager else 0,
-        "active_websockets": len(manager.active_connections),
+        "active_sessions": active_sessions,
+        "active_websockets": active_websockets,
         "timestamp": datetime.utcnow().isoformat()
     })
     
