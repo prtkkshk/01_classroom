@@ -1,5 +1,6 @@
 # Deployment fix - Force redeploy with CORS and CSP headers $(date)
 # This comment ensures the latest version is deployed with security headers
+# Fixed authentication error handling - removed problematic try-catch in get_courses endpoint
 
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, WebSocket, WebSocketDisconnect, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -918,26 +919,20 @@ async def create_course(course_data: CourseCreate, current_user: User = Depends(
 
 @api_router.get("/courses", response_model=List[Course])
 async def get_courses(current_user: User = Depends(get_current_user)):
-    try:
-        logger.info(f"User accessing courses: {current_user.id}, role: {current_user.role}")
-        
-        if current_user.role == "professor":
-            courses = await db.courses.find({"professor_id": current_user.id, "is_active": True}).to_list(1000)
-        elif current_user.role == "student":
-            courses = await db.courses.find({"students": current_user.id, "is_active": True}).to_list(1000)
-        elif current_user.role == "moderator":
-            courses = await db.courses.find({"is_active": True}).to_list(1000)
-        else:
-            raise HTTPException(status_code=403, detail="Invalid role")
-        
-        courses = fix_mongo_ids(courses)
-        logger.info(f"Found {len(courses)} courses for user {current_user.id}")
-        return [Course(**course) for course in courses]
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in get_courses: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    logger.info(f"User accessing courses: {current_user.id}, role: {current_user.role}")
+    
+    if current_user.role == "professor":
+        courses = await db.courses.find({"professor_id": current_user.id, "is_active": True}).to_list(1000)
+    elif current_user.role == "student":
+        courses = await db.courses.find({"students": current_user.id, "is_active": True}).to_list(1000)
+    elif current_user.role == "moderator":
+        courses = await db.courses.find({"is_active": True}).to_list(1000)
+    else:
+        raise HTTPException(status_code=403, detail="Invalid role")
+    
+    courses = fix_mongo_ids(courses)
+    logger.info(f"Found {len(courses)} courses for user {current_user.id}")
+    return [Course(**course) for course in courses]
 
 @api_router.post("/courses/join")
 async def join_course(course_data: CourseJoin, current_user: User = Depends(get_current_user)):
