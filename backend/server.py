@@ -118,6 +118,15 @@ app.add_middleware(
     expose_headers=["*"]
 )
 
+# Import enhanced components first
+try:
+    from middleware import setup_middleware, rate_limit_middleware, security_middleware_func, error_handling_middleware, logging_middleware
+    from session_manager import EnhancedSessionManager
+    ENHANCED_FEATURES_AVAILABLE = True
+except ImportError:
+    ENHANCED_FEATURES_AVAILABLE = False
+    logging.warning("Enhanced features (middleware, session manager) not available. Using basic features.")
+
 # Add trusted host middleware for security
 app.add_middleware(
     TrustedHostMiddleware,
@@ -127,7 +136,6 @@ app.add_middleware(
 # Add custom middleware if available
 if ENHANCED_FEATURES_AVAILABLE:
     try:
-        from middleware import logging_middleware, security_middleware_func, error_handling_middleware
         app.middleware("http")(logging_middleware)
         app.middleware("http")(security_middleware_func)
         app.middleware("http")(error_handling_middleware)
@@ -137,15 +145,6 @@ if ENHANCED_FEATURES_AVAILABLE:
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
-
-# Import enhanced components
-try:
-    from middleware import setup_middleware, rate_limit_middleware, security_middleware_func, error_handling_middleware
-    from session_manager import EnhancedSessionManager
-    ENHANCED_FEATURES_AVAILABLE = True
-except ImportError:
-    ENHANCED_FEATURES_AVAILABLE = False
-    logging.warning("Enhanced features (middleware, session manager) not available. Using basic features.")
 
 # Hardcoded credentials
 PROFESSOR_USERNAME = "professor60201"
