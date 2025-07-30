@@ -157,8 +157,8 @@ MODERATOR_PASSWORD = "pepper_14627912"
 session_storage = {}
 active_sessions = set()
 
-# Global session manager
-session_manager = None
+# Global session manager - Initialize with basic fallback immediately
+session_manager = EnhancedSessionManager() if ENHANCED_FEATURES_AVAILABLE else None
 
 # Input validation and sanitization functions
 def sanitize_input(text: str) -> str:
@@ -166,15 +166,15 @@ def sanitize_input(text: str) -> str:
     if not text:
         return ""
     
-    # Remove potentially dangerous characters
-    dangerous_chars = ['<', '>', '"', "'", '&', ';', '(', ')', '{', '}', '[', ']']
+    # Only remove truly dangerous characters, allow normal punctuation
+    dangerous_chars = ['<', '>', '&']
     for char in dangerous_chars:
         text = text.replace(char, '')
     
-    # Remove newlines and tabs
+    # Remove newlines and tabs but keep spaces
     text = text.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
     
-    # Remove multiple spaces
+    # Remove multiple spaces but keep single spaces
     text = ' '.join(text.split())
     
     return text.strip()
@@ -201,8 +201,8 @@ def validate_password_strength(password: str) -> bool:
 
 def validate_roll_number(roll_number: str) -> bool:
     """Validate roll number format"""
-    # Allow alphanumeric with hyphens and underscores
-    pattern = r'^[a-zA-Z0-9_-]+$'
+    # Allow alphanumeric with hyphens, underscores, and dots
+    pattern = r'^[a-zA-Z0-9_\-\.]+$'
     return bool(re.match(pattern, roll_number)) and len(roll_number) <= 20
 
 def validate_userid(userid: str) -> bool:
@@ -247,6 +247,9 @@ class UserCreate(BaseModel):
         v = sanitize_input(v)
         if len(v) < 2 or len(v) > 50:
             raise ValueError('Name must be between 2 and 50 characters')
+        # Allow normal names with spaces, hyphens, apostrophes
+        if not re.match(r'^[a-zA-Z\s\-\'\.]+$', v):
+            raise ValueError('Name contains invalid characters')
         return v
 
     @validator('roll_number')
@@ -280,6 +283,9 @@ class UserCreateProfessor(BaseModel):
         v = sanitize_input(v)
         if len(v) < 2 or len(v) > 50:
             raise ValueError('Name must be between 2 and 50 characters')
+        # Allow normal names with spaces, hyphens, apostrophes
+        if not re.match(r'^[a-zA-Z\s\-\'\.]+$', v):
+            raise ValueError('Name contains invalid characters')
         return v
 
     @validator('userid')
@@ -593,10 +599,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         user["_id"] = str(user["_id"])
         
         # Update last active timestamp
-        await db.users.update_one(
-            {"_id": user["_id"]},
-            {"$set": {"last_active": datetime.utcnow()}}
-        )
+        try:
+            await db.users.update_one(
+                {"_id": user["_id"]},
+                {"$set": {"last_active": datetime.utcnow()}}
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update last_active: {e}")
+            # Don't fail authentication if this fails
         
         return User(**user)
     except HTTPException:
@@ -604,8 +614,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     except Exception as e:
         logger.error(f"Database error in get_current_user: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
 # Optional authentication for WebSocket
@@ -718,7 +729,8 @@ async def register(user_data: UserCreate):
         
         # Add session
         try:
-            await session_manager.add_session(access_token, user_data_dict)
+            if session_manager:
+                await session_manager.add_session(access_token, user_data_dict)
         except Exception as e:
             logger.warning(f"Failed to add session: {e}")
             # Continue without session if session manager fails
@@ -775,7 +787,8 @@ async def login(user_credentials: UserLogin):
         }
         
         try:
-            await session_manager.add_session(access_token, user_data_dict)
+            if session_manager:
+                await session_manager.add_session(access_token, user_data_dict)
         except Exception as e:
             logger.warning(f"Failed to add session: {e}")
             # Continue without session if session manager fails
@@ -825,7 +838,8 @@ async def login(user_credentials: UserLogin):
         }
         
         try:
-            await session_manager.add_session(access_token, user_data_dict)
+            if session_manager:
+                await session_manager.add_session(access_token, user_data_dict)
         except Exception as e:
             logger.warning(f"Failed to add session: {e}")
             # Continue without session if session manager fails
@@ -870,7 +884,8 @@ async def login(user_credentials: UserLogin):
         }
         
         try:
-            await session_manager.add_session(access_token, user_data_dict)
+            if session_manager:
+                await session_manager.add_session(access_token, user_data_dict)
         except Exception as e:
             logger.warning(f"Failed to add session: {e}")
             # Continue without session if session manager fails
@@ -893,7 +908,8 @@ async def login(user_credentials: UserLogin):
 async def logout(current_user: User = Depends(get_current_user), credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         token = credentials.credentials
-        await session_manager.remove_session(token)
+        if session_manager:
+            await session_manager.remove_session(token)
         return {"message": "Logged out successfully"}
     except Exception as e:
         logger.warning(f"Logout error: {e}")
@@ -1480,7 +1496,11 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
         "userid": professor_obj.userid
     }
     
-    await session_manager.add_session(access_token, user_data_dict)
+    try:
+        if session_manager:
+            await session_manager.add_session(access_token, user_data_dict)
+    except Exception as e:
+        logger.warning(f"Failed to add session for professor: {e}")
     
     return {
         "access_token": access_token,
@@ -1946,40 +1966,146 @@ async def startup_event():
     except Exception:
         pass  # Index doesn't exist, which is fine
     
-    # Enhanced indexes for scalability
-    await db.users.create_index("email", unique=True)
-    await db.users.create_index("roll_number", unique=True, sparse=True)
-    await db.users.create_index("userid", unique=True, sparse=True)
-    await db.users.create_index("role")
-    await db.users.create_index("created_at")
+    # Enhanced indexes for scalability - handle errors gracefully
+    try:
+        await db.users.create_index("email", unique=True)
+    except Exception as e:
+        logger.warning(f"Failed to create email index: {e}")
     
-    await db.courses.create_index("code", unique=True)
-    await db.courses.create_index("professor_id")
-    await db.courses.create_index("students")
-    await db.courses.create_index("is_active")
-    await db.courses.create_index("created_at")
+    try:
+        await db.users.create_index("roll_number", unique=True, sparse=True)
+    except Exception as e:
+        logger.warning(f"Failed to create roll_number index: {e}")
     
-    await db.questions.create_index("course_id")
-    await db.questions.create_index("user_id")
-    await db.questions.create_index("created_at")
-    await db.questions.create_index([("priority", -1), ("created_at", -1)])
-    await db.questions.create_index("is_answered")
+    try:
+        await db.users.create_index("userid", unique=True, sparse=True)
+    except Exception as e:
+        logger.warning(f"Failed to create userid index: {e}")
     
-    await db.polls.create_index("course_id")
-    await db.polls.create_index("created_by")
-    await db.polls.create_index("expires_at")
-    await db.polls.create_index("is_active")
-    await db.polls.create_index("created_at")
+    try:
+        await db.users.create_index("role")
+    except Exception as e:
+        logger.warning(f"Failed to create role index: {e}")
     
-    await db.votes.create_index("poll_id")
-    await db.votes.create_index("user_id")
-    await db.votes.create_index([("poll_id", 1), ("user_id", 1)], unique=True)
-    await db.votes.create_index("created_at")
+    try:
+        await db.users.create_index("created_at")
+    except Exception as e:
+        logger.warning(f"Failed to create created_at index: {e}")
     
-    await db.announcements.create_index("course_id")
-    await db.announcements.create_index("created_by")
-    await db.announcements.create_index("created_at")
-    await db.announcements.create_index("expires_at")
+    try:
+        await db.courses.create_index("code", unique=True)
+    except Exception as e:
+        logger.warning(f"Failed to create courses code index: {e}")
+    
+    try:
+        await db.courses.create_index("professor_id")
+    except Exception as e:
+        logger.warning(f"Failed to create courses professor_id index: {e}")
+    
+    try:
+        await db.courses.create_index("students")
+    except Exception as e:
+        logger.warning(f"Failed to create courses students index: {e}")
+    
+    try:
+        await db.courses.create_index("is_active")
+    except Exception as e:
+        logger.warning(f"Failed to create courses is_active index: {e}")
+    
+    try:
+        await db.courses.create_index("created_at")
+    except Exception as e:
+        logger.warning(f"Failed to create courses created_at index: {e}")
+    
+    try:
+        await db.questions.create_index("course_id")
+    except Exception as e:
+        logger.warning(f"Failed to create questions course_id index: {e}")
+    
+    try:
+        await db.questions.create_index("user_id")
+    except Exception as e:
+        logger.warning(f"Failed to create questions user_id index: {e}")
+    
+    try:
+        await db.questions.create_index("created_at")
+    except Exception as e:
+        logger.warning(f"Failed to create questions created_at index: {e}")
+    
+    try:
+        await db.questions.create_index([("priority", -1), ("created_at", -1)])
+    except Exception as e:
+        logger.warning(f"Failed to create questions priority index: {e}")
+    
+    try:
+        await db.questions.create_index("is_answered")
+    except Exception as e:
+        logger.warning(f"Failed to create questions is_answered index: {e}")
+    
+    try:
+        await db.polls.create_index("course_id")
+    except Exception as e:
+        logger.warning(f"Failed to create polls course_id index: {e}")
+    
+    try:
+        await db.polls.create_index("created_by")
+    except Exception as e:
+        logger.warning(f"Failed to create polls created_by index: {e}")
+    
+    try:
+        await db.polls.create_index("expires_at")
+    except Exception as e:
+        logger.warning(f"Failed to create polls expires_at index: {e}")
+    
+    try:
+        await db.polls.create_index("is_active")
+    except Exception as e:
+        logger.warning(f"Failed to create polls is_active index: {e}")
+    
+    try:
+        await db.polls.create_index("created_at")
+    except Exception as e:
+        logger.warning(f"Failed to create polls created_at index: {e}")
+    
+    try:
+        await db.votes.create_index("poll_id")
+    except Exception as e:
+        logger.warning(f"Failed to create votes poll_id index: {e}")
+    
+    try:
+        await db.votes.create_index("user_id")
+    except Exception as e:
+        logger.warning(f"Failed to create votes user_id index: {e}")
+    
+    try:
+        await db.votes.create_index([("poll_id", 1), ("user_id", 1)], unique=True)
+    except Exception as e:
+        logger.warning(f"Failed to create votes compound index: {e}")
+    
+    try:
+        await db.votes.create_index("created_at")
+    except Exception as e:
+        logger.warning(f"Failed to create votes created_at index: {e}")
+    
+    try:
+        await db.announcements.create_index("course_id")
+    except Exception as e:
+        logger.warning(f"Failed to create announcements course_id index: {e}")
+    
+    try:
+        await db.announcements.create_index("created_by")
+    except Exception as e:
+        logger.warning(f"Failed to create announcements created_by index: {e}")
+    
+    try:
+        await db.announcements.create_index("created_at")
+    except Exception as e:
+        logger.warning(f"Failed to create announcements created_at index: {e}")
+    
+    try:
+        await db.announcements.create_index("expires_at")
+    except Exception as e:
+        logger.warning(f"Failed to create announcements expires_at index: {e}")
     
     logger.info("Database indexes created successfully")
     
