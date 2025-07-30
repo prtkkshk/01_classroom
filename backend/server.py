@@ -910,16 +910,21 @@ async def create_course(course_data: CourseCreate, current_user: User = Depends(
 
 @api_router.get("/courses", response_model=List[Course])
 async def get_courses(current_user: User = Depends(get_current_user)):
-    if current_user.role == "professor":
-        courses = await db.courses.find({"professor_id": current_user.id, "is_active": True}).to_list(1000)
-    elif current_user.role == "student":
-        courses = await db.courses.find({"students": current_user.id, "is_active": True}).to_list(1000)
-    elif current_user.role == "moderator":
-        courses = await db.courses.find({"is_active": True}).to_list(1000)
-    else:
-        raise HTTPException(status_code=403, detail="Invalid role")
-    courses = fix_mongo_ids(courses)
-    return [Course(**course) for course in courses]
+    try:
+        if current_user.role == "professor":
+            courses = await db.courses.find({"professor_id": current_user.id, "is_active": True}).to_list(1000)
+        elif current_user.role == "student":
+            courses = await db.courses.find({"students": current_user.id, "is_active": True}).to_list(1000)
+        elif current_user.role == "moderator":
+            courses = await db.courses.find({"is_active": True}).to_list(1000)
+        else:
+            raise HTTPException(status_code=403, detail="Invalid role")
+        
+        courses = fix_mongo_ids(courses)
+        return [Course(**course) for course in courses]
+    except Exception as e:
+        logger.error(f"Error in get_courses: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @api_router.post("/courses/join")
 async def join_course(course_data: CourseJoin, current_user: User = Depends(get_current_user)):
@@ -1852,22 +1857,10 @@ async def cleanup_expired_sessions():
     """Clean up expired sessions periodically"""
     while True:
         try:
-            expired_count = 0
-            current_time = datetime.utcnow()
-            expired_tokens = []
-            for token, user_data in list(session_manager.active_sessions.items()):
-                try:
-                    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-                    exp = payload.get("exp")
-                    if exp and datetime.utcfromtimestamp(exp) < current_time:
-                        expired_tokens.append(token)
-                except jwt.PyJWTError:
-                    expired_tokens.append(token)
-            for token in expired_tokens:
-                session_manager.remove_session(token)
-                expired_count += 1
-            if expired_count > 0:
-                logger.info(f"Cleaned up {expired_count} expired sessions")
+            if session_manager:
+                expired_count = await session_manager.cleanup_expired_sessions()
+                if expired_count > 0:
+                    logger.info(f"Cleaned up {expired_count} expired sessions")
             await asyncio.sleep(3600)  # 1 hour
         except Exception as e:
             logger.error(f"Session cleanup error: {str(e)}")
@@ -1992,8 +1985,15 @@ async def startup_event():
 async def shutdown_event():
     logger.info("Shutting down Classroom Live API...")
     client.close()
-    session_manager.active_sessions.clear()
-    session_manager.user_sessions.clear()
+    if session_manager:
+        try:
+            # Clear memory sessions if using memory fallback
+            if hasattr(session_manager, 'memory_sessions'):
+                session_manager.memory_sessions.clear()
+                session_manager.memory_user_sessions.clear()
+                session_manager.memory_active_sessions.clear()
+        except Exception as e:
+            logger.warning(f"Error clearing sessions during shutdown: {e}")
     logger.info("Classroom Live API shutdown complete")
 
 # Error handlers
