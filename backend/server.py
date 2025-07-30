@@ -547,7 +547,7 @@ app.include_router(api_router)
 
 # Authentication function
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    if not credentials:
+    if credentials is None:
         logger.warning("No credentials provided in request")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
