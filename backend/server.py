@@ -68,9 +68,11 @@ async def get_redis():
             redis_client = redis.from_url(redis_url, decode_responses=True)
             # Test the connection
             await redis_client.ping()
+            logger.info("Redis connection established successfully")
         return redis_client
     except Exception as e:
         logger.warning(f"Redis connection failed: {e}. Using in-memory fallback.")
+        redis_client = None  # Reset to None so we can retry later
         return None
 
 # Security
@@ -1532,6 +1534,27 @@ async def delete_vote(vote_id: str, current_user: User = Depends(get_current_use
     
     return {"message": "Vote deleted successfully"}
 
+# Root endpoint
+@app.get("/")
+async def root():
+    return {
+        "message": "Classroom Live API",
+        "version": "2.0.0",
+        "status": "running",
+        "docs": "/docs",
+        "health": "/api/health",
+        "info": "/api/info"
+    }
+
+# Simple status endpoint for monitoring
+@app.get("/status")
+async def status():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": "2.0.0"
+    }
+
 # Health check and info endpoints
 @api_router.get("/health")
 async def health_check():
@@ -1687,15 +1710,16 @@ async def startup_event():
     logger.info("Starting Classroom Live API with enhanced features...")
     
     # Initialize Redis connection
-    try:
-        redis_client = await get_redis()
-        await redis_client.ping()
-        logger.info("Redis connection established")
-    except Exception as e:
-        logger.error(f"Redis connection failed: {e}")
-        # Fallback to in-memory session manager
-        session_manager = SessionManager()
-        logger.warning("Using in-memory session manager as fallback")
+    redis_client = await get_redis()
+    if redis_client:
+        try:
+            await redis_client.ping()
+            logger.info("Redis connection established")
+        except Exception as e:
+            logger.error(f"Redis ping failed: {e}")
+            redis_client = None
+    else:
+        logger.warning("Redis not available, using in-memory session manager")
     
     # Initialize enhanced session manager
     if redis_client and ENHANCED_FEATURES_AVAILABLE:
