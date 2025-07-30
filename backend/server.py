@@ -9,6 +9,10 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import uuid
@@ -119,7 +123,7 @@ try:
     ENHANCED_FEATURES_AVAILABLE = True
 except ImportError:
     ENHANCED_FEATURES_AVAILABLE = False
-    logger.warning("Enhanced features (middleware, session manager) not available. Using basic features.")
+    logging.warning("Enhanced features (middleware, session manager) not available. Using basic features.")
 
 # Hardcoded credentials
 PROFESSOR_USERNAME = "professor60201"
@@ -297,11 +301,11 @@ class SessionManager:
         self.user_sessions = defaultdict(list)  # user_id -> list of tokens
         self.websocket_sessions = {}  # websocket -> user_data
     
-    def add_session(self, token, user_data):
+    async def add_session(self, token, user_data):
         self.active_sessions[token] = user_data
         self.user_sessions[user_data['id']].append(token)
     
-    def remove_session(self, token):
+    async def remove_session(self, token):
         if token in self.active_sessions:
             user_data = self.active_sessions[token]
             if token in self.user_sessions[user_data['id']]:
@@ -311,7 +315,7 @@ class SessionManager:
     def get_user_sessions(self, user_id):
         return self.user_sessions.get(user_id, [])
     
-    def is_token_valid(self, token):
+    async def is_token_valid(self, token):
         return token in self.active_sessions
     
     def get_user_from_token(self, token):
@@ -416,7 +420,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     )
     
     # Re-add to session manager if not present
-    if not session_manager.is_token_valid(token):
+    if not await session_manager.is_token_valid(token):
         username_field = user.get("roll_number") if user["role"] == "student" else user.get("userid")
         user_data_dict = {
             "id": user["id"],
@@ -427,7 +431,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             "roll_number": user.get("roll_number"),
             "userid": user.get("userid")
         }
-        session_manager.add_session(token, user_data_dict)
+        await session_manager.add_session(token, user_data_dict)
     
     return User(**user)
 
@@ -523,14 +527,14 @@ async def register(user_data: UserCreate):
             raise HTTPException(status_code=400, detail="Email already registered")
         
         # Create new user
-        user_dict = user_data.dict()
+        user_dict = user_data.model_dump()
         user_dict["password_hash"] = get_password_hash(user_data.password)
         user_dict["role"] = "student"
         user_dict.pop("password")
         
         user_obj = User(**user_dict)
         try:
-            await db.users.insert_one(user_obj.dict())
+            await db.users.insert_one(user_obj.model_dump())
         except Exception as e:
             # Handle duplicate key error (race condition)
             if "duplicate key error" in str(e):
@@ -553,7 +557,7 @@ async def register(user_data: UserCreate):
         }
         
         # Add to session manager
-        session_manager.add_session(access_token, user_data_dict)
+        await session_manager.add_session(access_token, user_data_dict)
         
         return {
             "access_token": access_token,
@@ -589,8 +593,8 @@ async def login(user_credentials: UserLogin):
                 name="Moderator",
                 userid=MODERATOR_USERNAME
             )
-            await db.users.insert_one(moderator_user.dict())
-            moderator = moderator_user.dict()
+            await db.users.insert_one(moderator_user.model_dump())
+            moderator = moderator_user.model_dump()
         
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
@@ -606,7 +610,7 @@ async def login(user_credentials: UserLogin):
             "userid": moderator["userid"]
         }
         
-        session_manager.add_session(access_token, user_data_dict)
+        await session_manager.add_session(access_token, user_data_dict)
         
         return {
             "access_token": access_token,
@@ -635,8 +639,8 @@ async def login(user_credentials: UserLogin):
                 name="Professor",
                 userid=PROFESSOR_USERNAME
             )
-            await db.users.insert_one(professor_user.dict())
-            professor = professor_user.dict()
+            await db.users.insert_one(professor_user.model_dump())
+            professor = professor_user.model_dump()
         
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
@@ -652,7 +656,7 @@ async def login(user_credentials: UserLogin):
             "userid": professor["userid"]
         }
         
-        session_manager.add_session(access_token, user_data_dict)
+        await session_manager.add_session(access_token, user_data_dict)
         
         return {
             "access_token": access_token,
@@ -689,7 +693,7 @@ async def login(user_credentials: UserLogin):
         "userid": user.get("userid")
     }
     
-    session_manager.add_session(access_token, user_data_dict)
+    await session_manager.add_session(access_token, user_data_dict)
     
     return {
         "access_token": access_token,
@@ -700,7 +704,7 @@ async def login(user_credentials: UserLogin):
 @api_router.post("/logout")
 async def logout(current_user: User = Depends(get_current_user), credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
-    session_manager.remove_session(token)
+    await session_manager.remove_session(token)
     return {"message": "Logged out successfully"}
 
 # Course Routes
@@ -718,7 +722,7 @@ async def create_course(course_data: CourseCreate, current_user: User = Depends(
         professor_name=current_user.name
     )
     
-    await db.courses.insert_one(course.dict())
+    await db.courses.insert_one(course.model_dump())
     return course
 
 @api_router.get("/courses", response_model=List[Course])
@@ -820,19 +824,19 @@ async def create_question(question_data: QuestionCreate, current_user: User = De
     if current_user.id not in course["students"]:
         raise HTTPException(status_code=403, detail="You must be enrolled in this course to ask questions")
     
-    question_dict = question_data.dict()
+    question_dict = question_data.model_dump()
     question_dict["user_id"] = current_user.id
     question_dict["username"] = current_user.name if not question_data.is_anonymous else "Anonymous"
     
     question_obj = Question(**question_dict)
-    await db.questions.insert_one(question_obj.dict())
+    await db.questions.insert_one(question_obj.model_dump())
     
     # Broadcast to course participants
     await manager.broadcast_to_course(
         question_data.course_id,
         json.dumps({
             "type": "new_question",
-            "data": question_obj.dict()
+            "data": question_obj.model_dump()
         }, default=str)
     )
     
@@ -952,7 +956,7 @@ async def create_poll(poll_data: PollCreate, current_user: User = Depends(get_cu
     if course["professor_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="You can only create polls in your own courses")
     
-    poll_dict = poll_data.dict()
+    poll_dict = poll_data.model_dump()
     poll_dict["created_by"] = current_user.id
     
     # Set expiration time if specified
@@ -962,14 +966,14 @@ async def create_poll(poll_data: PollCreate, current_user: User = Depends(get_cu
     poll_dict.pop("expires_minutes", None)
     
     poll_obj = Poll(**poll_dict)
-    await db.polls.insert_one(poll_obj.dict())
+    await db.polls.insert_one(poll_obj.model_dump())
     
     # Broadcast to course participants
     await manager.broadcast_to_course(
         poll_data.course_id,
         json.dumps({
             "type": "new_poll",
-            "data": poll_obj.dict()
+            "data": poll_obj.model_dump()
         }, default=str)
     )
     
@@ -1031,11 +1035,11 @@ async def vote_on_poll(poll_id: str, vote_data: VoteCreate, current_user: User =
         if option not in poll["options"]:
             raise HTTPException(status_code=400, detail=f"Invalid option: {option}")
     
-    vote_dict = vote_data.dict()
+    vote_dict = vote_data.model_dump()
     vote_dict["user_id"] = current_user.id
     
     vote_obj = Vote(**vote_dict)
-    await db.votes.insert_one(vote_obj.dict())
+    await db.votes.insert_one(vote_obj.model_dump())
     
     # Broadcast vote update to professor (anonymous if poll is anonymous)
     if not poll.get("is_anonymous", False):
@@ -1130,7 +1134,7 @@ async def create_announcement(announcement_data: AnnouncementCreate, current_use
     if course["professor_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="You can only create announcements in your own courses")
     
-    announcement_dict = announcement_data.dict()
+    announcement_dict = announcement_data.model_dump()
     announcement_dict["created_by"] = current_user.id
     
     # Set expiration time if specified
@@ -1140,14 +1144,14 @@ async def create_announcement(announcement_data: AnnouncementCreate, current_use
     announcement_dict.pop("expires_hours", None)
     
     announcement_obj = Announcement(**announcement_dict)
-    await db.announcements.insert_one(announcement_obj.dict())
+    await db.announcements.insert_one(announcement_obj.model_dump())
     
     # Broadcast to course participants
     await manager.broadcast_to_course(
         announcement_data.course_id,
         json.dumps({
             "type": "new_announcement",
-            "data": announcement_obj.dict()
+            "data": announcement_obj.model_dump()
         }, default=str)
     )
     
@@ -1229,7 +1233,7 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
         raise HTTPException(status_code=400, detail="User ID already registered")
     
     try:
-        professor_dict = professor_data.dict()
+        professor_dict = professor_data.model_dump()
         professor_dict["password_hash"] = get_password_hash(professor_data.password)
         professor_dict["role"] = "professor"
         # Assign a unique timestamp-based roll number for professors to avoid duplicate key issues
@@ -1241,9 +1245,9 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
         professor_obj = User(**professor_dict)
         
         # Debug: Log the data being inserted
-        logger.info(f"Inserting professor: {professor_obj.dict()}")
+        logger.info(f"Inserting professor: {professor_obj.model_dump()}")
         
-        result = await db.users.insert_one(professor_obj.dict())
+        result = await db.users.insert_one(professor_obj.model_dump())
         logger.info(f"Professor created successfully: {result.inserted_id}")
         
     except Exception as e:
@@ -1274,7 +1278,7 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
         "userid": professor_obj.userid
     }
     
-    session_manager.add_session(access_token, user_data_dict)
+    await session_manager.add_session(access_token, user_data_dict)
     
     return {
         "access_token": access_token,
@@ -1389,6 +1393,13 @@ async def get_active_sessions(current_user: User = Depends(get_current_user)):
     if current_user.role != "moderator":
         raise HTTPException(status_code=403, detail="Only moderators can access this endpoint")
     
+    if session_manager is None:
+        return {
+            "total_active_sessions": 0,
+            "unique_users": 0,
+            "user_sessions": {}
+        }
+    
     active_sessions = session_manager.active_sessions
     session_count = len(active_sessions)
     
@@ -1446,7 +1457,7 @@ async def update_any_question(question_id: str, question_update: QuestionUpdate,
     if not question:
         raise HTTPException(status_code=404, detail="Question not found")
     
-    update_data = {k: v for k, v in question_update.dict().items() if v is not None}
+    update_data = {k: v for k, v in question_update.model_dump().items() if v is not None}
     
     if question_update.is_answered is True and not question.get("is_answered"):
         update_data["answered_at"] = datetime.utcnow()
@@ -1481,6 +1492,7 @@ async def delete_any_poll(poll_id: str, current_user: User = Depends(get_current
     await db.votes.delete_many({"poll_id": poll_id})
     
     # Delete the poll
+    
     await db.polls.delete_one({"id": poll_id})
     
     # Broadcast deletion
@@ -1529,7 +1541,7 @@ async def health_check():
     response = JSONResponse({
         "status": "healthy" if db_status == "healthy" else "degraded",
         "database": db_status,
-        "active_sessions": len(session_manager.active_sessions),
+        "active_sessions": len(session_manager.active_sessions) if session_manager else 0,
         "active_websockets": len(manager.active_connections),
         "timestamp": datetime.utcnow().isoformat()
     })
