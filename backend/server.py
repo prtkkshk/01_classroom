@@ -677,6 +677,13 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         raise
     except Exception as e:
         logger.error(f"Database error in get_current_user: {e}")
+        # Don't convert authentication errors to 500
+        if "User not found" in str(e) or "credentials" in str(e).lower():
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication failed",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error"
@@ -1924,7 +1931,6 @@ async def health_check():
         health_status["status"] = "degraded"
     
     # Add API uptime
-    import time
     health_status["uptime_seconds"] = time.time() - app.start_time if hasattr(app, 'start_time') else 0
     
     from fastapi.responses import JSONResponse
@@ -1932,6 +1938,9 @@ async def health_check():
     
     # Add CSP header
     response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';"
+    
+    # Add API component
+    health_status["components"]["api"] = "healthy"
     
     return response
 
