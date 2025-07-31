@@ -669,7 +669,7 @@ const CourseSelection = () => {
     if (result.success) {
       setShowJoinForm(false);
       setCourseCode('');
-      setSuccess('Successfully joined the course!');
+      setSuccess('Join request sent! Waiting for professor approval.');
     } else {
       setError(result.error);
     }
@@ -1183,6 +1183,19 @@ const StudentDashboard = () => {
     setAnnouncementLoading(false);
   };
 
+  // Handler for deleting an announcement
+  const handleDeleteAnnouncement = async (announcementId) => {
+    if (window.confirm('Are you sure you want to delete this announcement?')) {
+      try {
+        await axios.delete(`${API}/announcements/${announcementId}`);
+        fetchAnnouncements();
+      } catch (error) {
+        console.error('Error deleting announcement:', error);
+        alert('Error deleting announcement');
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white shadow-sm border-b">
@@ -1277,6 +1290,16 @@ const StudentDashboard = () => {
                 }`}
               >
                 Announcements
+              </button>
+              <button
+                onClick={() => setActiveTab('students')}
+                className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm ${
+                  activeTab === 'students'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Students
               </button>
             </nav>
           </div>
@@ -1435,11 +1458,106 @@ const StudentDashboard = () => {
                 {announcementLoading ? (
                   <div className="text-gray-500">Loading announcements...</div>
                 ) : (
-                  <AnnouncementList announcements={announcements} />
+                  <AnnouncementList 
+                    announcements={announcements} 
+                    onDelete={handleDeleteAnnouncement}
+                    showDeleteButton={user.role === 'professor' || user.role === 'moderator'}
+                  />
                 )}
 
                 {(user.role === 'professor' || user.role === 'moderator') && (
                   <AnnouncementForm onCreate={handleCreateAnnouncement} loading={announcementLoading} />
+                )}
+              </div>
+            )}
+
+            {activeTab === 'students' && (
+              <div>
+                <h2 className="text-xl font-semibold mb-6">Student Management</h2>
+                
+                {studentsError && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 mb-6">
+                    {studentsError}
+                  </div>
+                )}
+
+                {studentsLoading ? (
+                  <div className="text-gray-500">Loading students...</div>
+                ) : (
+                  <div className="space-y-8">
+                    {/* Pending Students Section */}
+                    <div>
+                      <h3 className="text-lg font-medium text-gray-900 mb-4">
+                        Pending Approvals ({pendingStudents.length})
+                      </h3>
+                      {pendingStudents.length === 0 ? (
+                        <p className="text-gray-500">No pending student requests.</p>
+                      ) : (
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                          <div className="space-y-3">
+                            {pendingStudents.map((student) => (
+                              <div key={student.id} className="flex items-center justify-between bg-white rounded-lg p-3 shadow-sm">
+                                <div className="flex-1">
+                                  <div className="font-medium text-gray-900">{student.name}</div>
+                                  <div className="text-sm text-gray-500">
+                                    {student.roll_number && `Roll: ${student.roll_number} • `}
+                                    {student.email}
+                                  </div>
+                                </div>
+                                <div className="flex space-x-2">
+                                  <button
+                                    onClick={() => handleApproveStudent(student.id)}
+                                    className="bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700 transition-colors"
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleRejectStudent(student.id)}
+                                    className="bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700 transition-colors"
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Enrolled Students Section */}
+                    <div>
+                      <h3 className="text-lg font-medium text-gray-900 mb-4">
+                        Enrolled Students ({enrolledStudents.length})
+                      </h3>
+                      {enrolledStudents.length === 0 ? (
+                        <p className="text-gray-500">No students enrolled yet.</p>
+                      ) : (
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                          <div className="space-y-3">
+                            {enrolledStudents.map((student) => (
+                              <div key={student.id} className="flex items-center justify-between bg-white rounded-lg p-3 shadow-sm">
+                                <div className="flex-1">
+                                  <div className="font-medium text-gray-900">{student.name}</div>
+                                  <div className="text-sm text-gray-500">
+                                    {student.roll_number && `Roll: ${student.roll_number} • `}
+                                    {student.email}
+                                    {student.last_active && ` • Last active: ${new Date(student.last_active).toLocaleDateString()}`}
+                                  </div>
+                                </div>
+                                <button
+                                  onClick={() => handleRemoveStudent(student.id)}
+                                  className="bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700 transition-colors"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
             )}
@@ -1470,11 +1588,18 @@ const ProfessorDashboard = () => {
   const [announcementLoading, setAnnouncementLoading] = useState(false);
   const [announcementError, setAnnouncementError] = useState('');
 
+  // Students state
+  const [enrolledStudents, setEnrolledStudents] = useState([]);
+  const [pendingStudents, setPendingStudents] = useState([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [studentsError, setStudentsError] = useState('');
+
   useEffect(() => {
     if (currentCourse) {
       fetchQuestions();
       fetchPolls();
       fetchAnnouncements();
+      fetchStudents();
     }
   }, [currentCourse]);
 
@@ -1484,6 +1609,7 @@ const ProfessorDashboard = () => {
       fetchQuestions();
       fetchPolls();
       fetchAnnouncements();
+      fetchStudents();
     }
   }, [lastUpdate]);
 
@@ -1516,6 +1642,21 @@ const ProfessorDashboard = () => {
       setAnnouncementError('Error fetching announcements');
     }
     setAnnouncementLoading(false);
+  };
+
+  const fetchStudents = async () => {
+    if (!currentCourse) return;
+    setStudentsLoading(true);
+    setStudentsError('');
+    try {
+      const response = await axios.get(`${API}/courses/${currentCourse.id}/students`);
+      setEnrolledStudents(response.data.enrolled_students || []);
+      setPendingStudents(response.data.pending_students || []);
+    } catch (error) {
+      console.error('Error fetching students:', error);
+      setStudentsError('Error fetching students');
+    }
+    setStudentsLoading(false);
   };
 
   const handleMarkAsAnswered = async (questionId) => {
@@ -1590,6 +1731,53 @@ const ProfessorDashboard = () => {
       setAnnouncementError('Error creating announcement');
     }
     setAnnouncementLoading(false);
+  };
+
+  // Handler for deleting an announcement
+  const handleDeleteAnnouncement = async (announcementId) => {
+    if (window.confirm('Are you sure you want to delete this announcement?')) {
+      try {
+        await axios.delete(`${API}/admin/announcements/${announcementId}`);
+        setSuccess('Announcement deleted successfully!');
+        fetchAnnouncements();
+      } catch (error) {
+        setError('Error deleting announcement');
+      }
+    }
+  };
+
+  const handleApproveStudent = async (studentId) => {
+    try {
+      await axios.post(`${API}/courses/${currentCourse.id}/students/${studentId}/approve`);
+      setSuccess('Student approved successfully!');
+      fetchStudents();
+    } catch (error) {
+      setError('Error approving student');
+    }
+  };
+
+  const handleRejectStudent = async (studentId) => {
+    if (window.confirm('Are you sure you want to reject this student?')) {
+      try {
+        await axios.post(`${API}/courses/${currentCourse.id}/students/${studentId}/reject`);
+        setSuccess('Student rejected successfully!');
+        fetchStudents();
+      } catch (error) {
+        setError('Error rejecting student');
+      }
+    }
+  };
+
+  const handleRemoveStudent = async (studentId) => {
+    if (window.confirm('Are you sure you want to remove this student from the course?')) {
+      try {
+        await axios.delete(`${API}/courses/${currentCourse.id}/students/${studentId}`);
+        setSuccess('Student removed successfully!');
+        fetchStudents();
+      } catch (error) {
+        setError('Error removing student');
+      }
+    }
   };
 
   return (
@@ -1676,6 +1864,16 @@ const ProfessorDashboard = () => {
                 }`}
               >
                 Announcements
+              </button>
+              <button
+                onClick={() => setActiveTab('students')}
+                className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-xs sm:text-sm ${
+                  activeTab === 'students'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Students
               </button>
             </nav>
           </div>
@@ -1814,11 +2012,106 @@ const ProfessorDashboard = () => {
                 {announcementLoading ? (
                   <div className="text-gray-500">Loading announcements...</div>
                 ) : (
-                  <AnnouncementList announcements={announcements} />
+                  <AnnouncementList 
+                    announcements={announcements} 
+                    onDelete={handleDeleteAnnouncement}
+                    showDeleteButton={true}
+                  />
                 )}
 
                 {(user.role === 'professor' || user.role === 'moderator') && (
                   <AnnouncementForm onCreate={handleCreateAnnouncement} loading={announcementLoading} />
+                )}
+              </div>
+            )}
+
+            {activeTab === 'students' && (
+              <div>
+                <h2 className="text-xl font-semibold mb-6">Student Management</h2>
+                
+                {studentsError && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 mb-6">
+                    {studentsError}
+                  </div>
+                )}
+
+                {studentsLoading ? (
+                  <div className="text-gray-500">Loading students...</div>
+                ) : (
+                  <div className="space-y-8">
+                    {/* Pending Students Section */}
+                    <div>
+                      <h3 className="text-lg font-medium text-gray-900 mb-4">
+                        Pending Approvals ({pendingStudents.length})
+                      </h3>
+                      {pendingStudents.length === 0 ? (
+                        <p className="text-gray-500">No pending student requests.</p>
+                      ) : (
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                          <div className="space-y-3">
+                            {pendingStudents.map((student) => (
+                              <div key={student.id} className="flex items-center justify-between bg-white rounded-lg p-3 shadow-sm">
+                                <div className="flex-1">
+                                  <div className="font-medium text-gray-900">{student.name}</div>
+                                  <div className="text-sm text-gray-500">
+                                    {student.roll_number && `Roll: ${student.roll_number} • `}
+                                    {student.email}
+                                  </div>
+                                </div>
+                                <div className="flex space-x-2">
+                                  <button
+                                    onClick={() => handleApproveStudent(student.id)}
+                                    className="bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700 transition-colors"
+                                  >
+                                    Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleRejectStudent(student.id)}
+                                    className="bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700 transition-colors"
+                                  >
+                                    Reject
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Enrolled Students Section */}
+                    <div>
+                      <h3 className="text-lg font-medium text-gray-900 mb-4">
+                        Enrolled Students ({enrolledStudents.length})
+                      </h3>
+                      {enrolledStudents.length === 0 ? (
+                        <p className="text-gray-500">No students enrolled yet.</p>
+                      ) : (
+                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                          <div className="space-y-3">
+                            {enrolledStudents.map((student) => (
+                              <div key={student.id} className="flex items-center justify-between bg-white rounded-lg p-3 shadow-sm">
+                                <div className="flex-1">
+                                  <div className="font-medium text-gray-900">{student.name}</div>
+                                  <div className="text-sm text-gray-500">
+                                    {student.roll_number && `Roll: ${student.roll_number} • `}
+                                    {student.email}
+                                    {student.last_active && ` • Last active: ${new Date(student.last_active).toLocaleDateString()}`}
+                                  </div>
+                                </div>
+                                <button
+                                  onClick={() => handleRemoveStudent(student.id)}
+                                  className="bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700 transition-colors"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
             )}
@@ -1974,6 +2267,18 @@ const ModeratorDashboard = () => {
       setAnnouncementError('Error creating announcement');
     }
     setAnnouncementLoading(false);
+  };
+
+  const handleDeleteAnnouncement = async (announcementId) => {
+    if (window.confirm('Are you sure you want to delete this announcement?')) {
+      try {
+        await axios.delete(`${API}/admin/announcements/${announcementId}`);
+        setSuccess('Announcement deleted successfully!');
+        fetchAnnouncements();
+      } catch (error) {
+        setError('Error deleting announcement');
+      }
+    }
   };
 
 
@@ -2494,6 +2799,13 @@ const ModeratorDashboard = () => {
                               </span>
                             </div>
                           </div>
+                          <button
+                            onClick={() => handleDeleteAnnouncement(announcement.id)}
+                            className="text-red-600 hover:text-red-800 text-sm"
+                            title="Delete announcement"
+                          >
+                            Delete
+                          </button>
                         </div>
                       </div>
                     ))}
@@ -2727,7 +3039,7 @@ const ModeratorAnnouncementForm = ({ onCreate, loading, courses }) => {
 };
 
 // AnnouncementList component
-const AnnouncementList = ({ announcements }) => (
+const AnnouncementList = ({ announcements, onDelete, showDeleteButton = false }) => (
   <div className="mb-8">
     <h3 className="text-lg font-semibold mb-2">Announcements</h3>
     {announcements.length === 0 ? (
@@ -2736,12 +3048,25 @@ const AnnouncementList = ({ announcements }) => (
       <ul className="space-y-3">
         {announcements.map((a) => (
           <li key={a.id} className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded shadow-sm">
-            <div className="font-bold text-yellow-800">{a.title}</div>
-            <div className="text-gray-700 whitespace-pre-line">{a.content}</div>
-            <div className="text-xs text-gray-500 mt-1">{a.created_at ? new Date(a.created_at).toLocaleString() : ''}</div>
-            {a.priority && a.priority !== 'normal' && (
-              <span className="ml-2 px-2 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs font-medium">{a.priority}</span>
-            )}
+            <div className="flex justify-between items-start">
+              <div className="flex-1">
+                <div className="font-bold text-yellow-800">{a.title}</div>
+                <div className="text-gray-700 whitespace-pre-line">{a.content}</div>
+                <div className="text-xs text-gray-500 mt-1">{a.created_at ? new Date(a.created_at).toLocaleString() : ''}</div>
+                {a.priority && a.priority !== 'normal' && (
+                  <span className="ml-2 px-2 py-0.5 bg-yellow-200 text-yellow-800 rounded text-xs font-medium">{a.priority}</span>
+                )}
+              </div>
+              {showDeleteButton && onDelete && (
+                <button
+                  onClick={() => onDelete(a.id)}
+                  className="text-red-600 hover:text-red-800 text-sm ml-2"
+                  title="Delete announcement"
+                >
+                  Delete
+                </button>
+              )}
+            </div>
           </li>
         ))}
       </ul>

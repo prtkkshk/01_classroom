@@ -644,7 +644,8 @@ class Course(BaseModel):
     code: str  # 8-letter unique code
     professor_id: str
     professor_name: str
-    students: List[str] = []  # List of student IDs
+    students: List[str] = []  # List of enrolled student IDs
+    pending_students: List[str] = []  # List of pending student IDs waiting for approval
     is_active: bool = True
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -1427,9 +1428,12 @@ async def join_course(course_data: CourseJoin, current_user: User = Depends(get_
         if current_user.id in course["students"]:
             raise HTTPException(status_code=400, detail="Already enrolled in this course")
         
+        if current_user.id in course.get("pending_students", []):
+            raise HTTPException(status_code=400, detail="Already requested to join this course")
+        
         await db.courses.update_one(
             {"id": course["id"]},
-            {"$push": {"students": current_user.id}}
+            {"$push": {"pending_students": current_user.id}}
         )
         
         # Notify via WebSocket if manager is available
@@ -1438,7 +1442,7 @@ async def join_course(course_data: CourseJoin, current_user: User = Depends(get_
                 await manager.send_to_user(
                     course["professor_id"],
                     json.dumps({
-                        "type": "student_joined",
+                        "type": "student_join_request",
                         "course_id": course["id"],
                         "student_name": current_user.name,
                         "student_id": current_user.id
@@ -1447,7 +1451,7 @@ async def join_course(course_data: CourseJoin, current_user: User = Depends(get_
             except Exception as e:
                 logger.warning(f"Failed to send WebSocket notification: {e}")
         
-        return {"message": f"Successfully joined course: {course['name']}"}
+        return {"message": f"Join request sent for course: {course['name']}. Waiting for professor approval."}
     except HTTPException:
         raise
     except Exception as e:
@@ -1483,19 +1487,163 @@ async def get_course_students(course_id: str, current_user: User = Depends(get_c
     if current_user.role == "professor" and course["professor_id"] != current_user.id:
         raise HTTPException(status_code=403, detail="Access denied")
     
-    students = []
+    # Get enrolled students
+    enrolled_students = []
     for student_id in course["students"]:
         student = await db.users.find_one({"id": student_id})
         if student:
-            students.append({
+            enrolled_students.append({
                 "id": student["id"],
                 "name": student["name"],
                 "roll_number": student.get("roll_number"),
                 "email": student["email"],
-                "last_active": student.get("last_active")
+                "last_active": student.get("last_active"),
+                "status": "enrolled"
             })
     
-    return {"students": students, "total_count": len(students)}
+    # Get pending students
+    pending_students = []
+    for student_id in course.get("pending_students", []):
+        student = await db.users.find_one({"id": student_id})
+        if student:
+            pending_students.append({
+                "id": student["id"],
+                "name": student["name"],
+                "roll_number": student.get("roll_number"),
+                "email": student["email"],
+                "last_active": student.get("last_active"),
+                "status": "pending"
+            })
+    
+    return {
+        "enrolled_students": enrolled_students, 
+        "pending_students": pending_students,
+        "total_enrolled": len(enrolled_students),
+        "total_pending": len(pending_students)
+    }
+
+@api_router.post("/courses/{course_id}/students/{student_id}/approve")
+async def approve_student(course_id: str, student_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role != "professor":
+        raise HTTPException(status_code=403, detail="Only professors can approve students")
+    
+    course = await db.courses.find_one({"id": course_id})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    if course["professor_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only approve students for your own courses")
+    
+    if student_id not in course.get("pending_students", []):
+        raise HTTPException(status_code=404, detail="Student not found in pending list")
+    
+    # Move student from pending to enrolled
+    await db.courses.update_one(
+        {"id": course_id},
+        {
+            "$pull": {"pending_students": student_id},
+            "$push": {"students": student_id}
+        }
+    )
+    
+    # Get student info for notification
+    student = await db.users.find_one({"id": student_id})
+    
+    # Notify student via WebSocket if manager is available
+    if manager and student:
+        try:
+            await manager.send_to_user(
+                student_id,
+                json.dumps({
+                    "type": "course_approved",
+                    "course_id": course_id,
+                    "course_name": course["name"]
+                })
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send WebSocket notification: {e}")
+    
+    return {"message": f"Student {student.get('name', 'Unknown')} approved for course"}
+
+@api_router.post("/courses/{course_id}/students/{student_id}/reject")
+async def reject_student(course_id: str, student_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role != "professor":
+        raise HTTPException(status_code=403, detail="Only professors can reject students")
+    
+    course = await db.courses.find_one({"id": course_id})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    if course["professor_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only reject students for your own courses")
+    
+    if student_id not in course.get("pending_students", []):
+        raise HTTPException(status_code=404, detail="Student not found in pending list")
+    
+    # Remove student from pending list
+    await db.courses.update_one(
+        {"id": course_id},
+        {"$pull": {"pending_students": student_id}}
+    )
+    
+    # Get student info for notification
+    student = await db.users.find_one({"id": student_id})
+    
+    # Notify student via WebSocket if manager is available
+    if manager and student:
+        try:
+            await manager.send_to_user(
+                student_id,
+                json.dumps({
+                    "type": "course_rejected",
+                    "course_id": course_id,
+                    "course_name": course["name"]
+                })
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send WebSocket notification: {e}")
+    
+    return {"message": f"Student {student.get('name', 'Unknown')} rejected from course"}
+
+@api_router.delete("/courses/{course_id}/students/{student_id}")
+async def remove_student(course_id: str, student_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role != "professor":
+        raise HTTPException(status_code=403, detail="Only professors can remove students")
+    
+    course = await db.courses.find_one({"id": course_id})
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not found")
+    
+    if course["professor_id"] != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only remove students from your own courses")
+    
+    if student_id not in course["students"]:
+        raise HTTPException(status_code=404, detail="Student not found in enrolled list")
+    
+    # Remove student from enrolled list
+    await db.courses.update_one(
+        {"id": course_id},
+        {"$pull": {"students": student_id}}
+    )
+    
+    # Get student info for notification
+    student = await db.users.find_one({"id": student_id})
+    
+    # Notify student via WebSocket if manager is available
+    if manager and student:
+        try:
+            await manager.send_to_user(
+                student_id,
+                json.dumps({
+                    "type": "course_removed",
+                    "course_id": course_id,
+                    "course_name": course["name"]
+                })
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send WebSocket notification: {e}")
+    
+    return {"message": f"Student {student.get('name', 'Unknown')} removed from course"}
 
 # Question Routes
 @api_router.post("/questions", response_model=Question)
@@ -2287,6 +2435,28 @@ async def delete_vote(vote_id: str, current_user: User = Depends(get_current_use
         raise HTTPException(status_code=404, detail="Vote not found")
     
     return {"message": "Vote deleted successfully"}
+
+@api_router.delete("/admin/announcements/{announcement_id}")
+async def delete_any_announcement(announcement_id: str, current_user: User = Depends(get_current_user)):
+    if current_user.role != "moderator":
+        raise HTTPException(status_code=403, detail="Only moderators can access this endpoint")
+    
+    announcement = await db.announcements.find_one({"id": announcement_id})
+    if not announcement:
+        raise HTTPException(status_code=404, detail="Announcement not found")
+    
+    await db.announcements.delete_one({"id": announcement_id})
+    
+    # Broadcast deletion to course participants
+    await manager.broadcast_to_course(
+        announcement["course_id"],
+        json.dumps({
+            "type": "announcement_deleted",
+            "announcement_id": announcement_id
+        })
+    )
+    
+    return {"message": "Announcement deleted successfully"}
 
 # Root endpoint
 @app.get("/")
