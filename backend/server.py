@@ -124,6 +124,14 @@ def check_security_violations(data: dict):
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer(auto_error=False)
 
+# Create the main app
+app = FastAPI(
+    title="Classroom Live API", 
+    version="2.0.0",
+    docs_url="/docs" if os.environ.get('ENVIRONMENT') != 'production' else None,
+    redoc_url="/redoc" if os.environ.get('ENVIRONMENT') != 'production' else None
+)
+
 # Custom exception handler for security violations
 @app.exception_handler(SecurityViolationException)
 async def security_violation_handler(request: Request, exc: SecurityViolationException):
@@ -161,14 +169,6 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         status_code=422,
         content={"detail": exc.errors()}
     )
-
-# Create the main app
-app = FastAPI(
-    title="Classroom Live API", 
-    version="2.0.0",
-    docs_url="/docs" if os.environ.get('ENVIRONMENT') != 'production' else None,
-    redoc_url="/redoc" if os.environ.get('ENVIRONMENT') != 'production' else None
-)
 
 # Enhanced CORS middleware with production-ready configuration
 allowed_origins = []
@@ -896,6 +896,15 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 detail="Invalid token: missing subject",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in JWT processing: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token processing failed",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
     try:
         # Try to find user by roll_number first (students), then by userid (professors/moderators)
