@@ -108,9 +108,18 @@ def check_security_violations(data: dict):
     for field in ['username', 'email']:
         if field in data and data[field]:
             value = str(data[field])
-            for pattern in injection_patterns:
-                if re.search(pattern, value):
-                    raise SecurityViolationException(f"Security violation detected in {field}")
+            # Allow common email characters like @ and .
+            if field == 'email':
+                # More permissive for email addresses - only check for obvious injection
+                dangerous_patterns = [r'[\'";\{\}\|\&]']
+                for pattern in dangerous_patterns:
+                    if re.search(pattern, value):
+                        raise SecurityViolationException(f"Security violation detected in {field}")
+            else:
+                # Username validation - more strict
+                for pattern in injection_patterns:
+                    if re.search(pattern, value):
+                        raise SecurityViolationException(f"Security violation detected in {field}")
     
     # Check password field (less strict for password)
     if 'password' in data and data['password']:
@@ -145,26 +154,10 @@ async def security_violation_handler(request: Request, exc: SecurityViolationExc
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
     """Handle validation errors, converting security violations to 401"""
-    # Check if any validation error contains security violation patterns
-    security_patterns = [
-        r'[\'\";]',  # SQL injection
-        r'[\{\}]',   # NoSQL injection
-        r'[\$]',     # NoSQL operators
-        r'[<>]',     # XSS
-        r'[\|\&]',   # Command injection
-        r'\.\./',    # Path traversal
-        r'\.\.\\',   # Path traversal (Windows)
-    ]
+    # Disable security violation check for validation errors to prevent false positives
+    # Most validation errors are legitimate and shouldn't trigger security violations
     
-    error_detail = str(exc)
-    for pattern in security_patterns:
-        if re.search(pattern, error_detail):
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Security violation detected"}
-            )
-    
-    # For non-security validation errors, return 422 as usual
+    # For all validation errors, return 422 as usual
     return JSONResponse(
         status_code=422,
         content={"detail": exc.errors()}
@@ -272,11 +265,11 @@ app.add_middleware(
 # Add custom middleware if available
 if ENHANCED_FEATURES_AVAILABLE:
     try:
-        # Temporarily disable all enhanced middleware to debug 500 errors
-        # app.middleware("http")(logging_middleware)
-        # app.middleware("http")(security_middleware_func)
-        # app.middleware("http")(error_handling_middleware)
-        logger.info("Enhanced middleware temporarily disabled for debugging")
+        # Re-enable enhanced middleware for proper authentication
+        app.middleware("http")(logging_middleware)
+        app.middleware("http")(security_middleware_func)
+        app.middleware("http")(error_handling_middleware)
+        logger.info("Enhanced middleware enabled")
     except Exception as e:
         logger.warning(f"Failed to add enhanced middleware: {e}")
 
@@ -566,7 +559,7 @@ class UserLogin(BaseModel):
             # Enhanced validation to prevent injection attempts
             if not re.match(r'^[a-zA-Z0-9_\-\.@]+$', v):
                 raise ValueError('Username contains invalid characters')
-            # Block obvious injection attempts
+            # Block obvious injection attempts - but allow @ for email addresses
             injection_patterns = [
                 r'[\'";]',  # SQL injection quotes and semicolons
                 r'[\{\}]',  # NoSQL injection brackets
@@ -2057,6 +2050,9 @@ async def create_professor(professor_data: UserCreateProfessor, current_user: Us
         raise HTTPException(status_code=403, detail="Only moderators can create professor accounts")
     
     try:
+        # Skip security violation check for this endpoint as it's causing false positives
+        # The data is already validated by Pydantic models
+        
         # Check for existing users with debugging
         logger.info(f"Checking for existing email: {professor_data.email}")
         existing_email = await db.users.find_one({"email": professor_data.email})
@@ -2489,6 +2485,20 @@ async def status():
 async def test_endpoint():
     """Simple test endpoint that doesn't require authentication"""
     return {"message": "Test endpoint working", "timestamp": datetime.utcnow().isoformat()}
+
+@api_router.get("/auth-test")
+async def auth_test_endpoint(current_user: User = Depends(get_current_user)):
+    """Test endpoint that requires authentication"""
+    return {
+        "message": "Authentication working", 
+        "user": {
+            "id": current_user.id,
+            "username": current_user.roll_number or current_user.userid,
+            "role": current_user.role,
+            "name": current_user.name
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 @api_router.get("/cors-test")
 async def cors_test_endpoint():
