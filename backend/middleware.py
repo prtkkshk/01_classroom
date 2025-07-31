@@ -152,11 +152,8 @@ async def security_middleware_func(request: Request, call_next):
     response = await call_next(request)
     security_middleware.add_security_headers(response)
     
-    # Add CORS headers
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
+    # Note: CORS headers are handled by FastAPI's CORSMiddleware
+    # Do not override CORS configuration here
     
     return response
 
