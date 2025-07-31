@@ -5,6 +5,7 @@ import './App.css';
 
 // Backend URL configuration
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'https://zero1-classroom-1.onrender.com';
+// const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8001';
 const cleanBackendUrl = BACKEND_URL.replace(/\/$/, '');
 const API = `${cleanBackendUrl}/api`;
 

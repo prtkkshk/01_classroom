@@ -172,7 +172,10 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 # Enhanced CORS middleware with production-ready configuration
 allowed_origins = []
-if os.environ.get('ENVIRONMENT') == 'production':
+environment = os.environ.get('ENVIRONMENT', 'development')
+logger.info(f"Environment detected: {environment}")
+
+if environment == 'production':
     allowed_origins = [
         "https://classroom-live.com",
         "https://www.classroom-live.com", 
@@ -186,19 +189,42 @@ else:
         "http://localhost:3000",
         "http://localhost:3001", 
         "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001"
+        "http://127.0.0.1:3001",
+        "https://zero1-classroom-1.onrender.com",
+        "https://zero1-classroom-2.onrender.com"
     ]
 
-# SECURITY: Never allow wildcard origins in any environment
+logger.info(f"Allowed origins: {allowed_origins}")
+
+# Add CORS middleware BEFORE other middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,  # No wildcards
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "User-Agent", "DNT", "Cache-Control", "X-Mx-ReqToken", "Keep-Alive", "X-Requested-With", "If-Modified-Since"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],
+    allow_headers=["*"],  # Allow all headers for better compatibility
     expose_headers=["*"],
     max_age=3600
 )
+
+# Debug middleware to log CORS requests
+@app.middleware("http")
+async def debug_cors_middleware(request: Request, call_next):
+    """Debug middleware to log CORS requests"""
+    origin = request.headers.get("origin")
+    method = request.method
+    path = request.url.path
+    
+    logger.info(f"CORS Debug - Method: {method}, Path: {path}, Origin: {origin}")
+    
+    response = await call_next(request)
+    
+    # Log response headers
+    cors_headers = {k: v for k, v in response.headers.items() if k.lower().startswith('access-control')}
+    if cors_headers:
+        logger.info(f"CORS Response Headers: {cors_headers}")
+    
+    return response
 
 # Input sanitization middleware
 @app.middleware("http")
@@ -223,7 +249,7 @@ async def add_security_headers(request: Request, call_next):
         "style-src 'self' 'unsafe-inline'; "
         "font-src 'self' data:; "
         "img-src 'self' data: https:; "
-        "connect-src 'self' ws: wss:;"
+        "connect-src 'self' ws: wss: https://zero1-classroom-1.onrender.com https://zero1-classroom-2.onrender.com;"
     )
     
     return response
@@ -240,7 +266,7 @@ except ImportError:
 # Add trusted host middleware for security
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["localhost", "127.0.0.1", "0.0.0.0", "classroom-live.onrender.com", "classroom-live.vercel.app", "zero1-classroom-1.onrender.com"]
+    allowed_hosts=["localhost", "127.0.0.1", "0.0.0.0", "classroom-live.onrender.com", "classroom-live.vercel.app", "zero1-classroom-1.onrender.com", "zero1-classroom-2.onrender.com"]
 )
 
 # Add custom middleware if available
@@ -2274,6 +2300,11 @@ async def root():
         "info": "/api/info"
     }
 
+# CORS preflight handler
+@app.options("/{full_path:path}")
+async def options_handler():
+    return {"message": "OK"}
+
 # Simple status endpoint for monitoring
 @app.get("/status")
 async def status():
@@ -2288,6 +2319,15 @@ async def status():
 async def test_endpoint():
     """Simple test endpoint that doesn't require authentication"""
     return {"message": "Test endpoint working", "timestamp": datetime.utcnow().isoformat()}
+
+@api_router.get("/cors-test")
+async def cors_test_endpoint():
+    """CORS test endpoint"""
+    return {
+        "message": "CORS test successful", 
+        "timestamp": datetime.utcnow().isoformat(),
+        "cors_enabled": True
+    }
 
 @api_router.get("/health")
 async def health_check():
